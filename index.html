@@ -149,32 +149,42 @@ function updateProximityPitch(rssi) {
   }
 }
 // --- 4. Motion Detection & Footstep Audio Trigger ---
-    document.getElementById("btn-audio").addEventListener("click", async () => {
-      const btn = document.getElementById("btn-audio");
+    const btnAudio = document.getElementById("btn-audio");
+    
+    // Ensure button is never stuck in a disabled state on load
+    btnAudio.removeAttribute("disabled");
+    btnAudio.style.opacity = "1";
+    btnAudio.style.pointerEvents = "auto";
 
+    btnAudio.addEventListener("click", async () => {
       try {
-        // Step A: Immediate permission call (synchronous with touch event)
+        // 1. Immediate iOS Motion Permission Request
         if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
           const permission = await DeviceMotionEvent.requestPermission();
           if (permission !== 'granted') {
-            alert('Motion sensor permission was denied.');
+            alert('Motion permission is required to trigger footsteps.');
             return;
           }
         }
 
-        // Step B: Unlock Web Audio Context
+        // 2. Unlock Tone.js Audio Engine
         await Tone.start();
         if (Tone.context.state !== 'running') {
           await Tone.context.resume();
         }
 
-        // Step C: Attach Listener & Update UI
+        // 3. Attach Motion Listener
         window.addEventListener("devicemotion", handleMotion);
-        btn.innerText = "System Active & Listening";
-        btn.style.backgroundColor = "#34c759";
+
+        // 4. Update UI Success State
+        btnAudio.innerText = "System Active & Listening";
+        btnAudio.style.backgroundColor = "#34c759";
 
       } catch (err) {
-        alert("Setup Error: " + err.message);
+        alert("Motion Setup Error: " + err.message);
+        // Reset button on failure
+        btnAudio.innerText = "2. Enable Step & Audio Engine";
+        btnAudio.style.backgroundColor = "#007aff";
       }
     });
 
