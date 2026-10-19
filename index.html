@@ -1,16 +1,15 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Proximity Digital Score Prototype</title>
-  <!-- Load Tone.js Audio Framework -->
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Proximity Score Engine</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
   <style>
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       background-color: #121212;
       color: #ffffff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       display: flex;
       flex-direction: column;
       align-items: center;
@@ -19,34 +18,36 @@
       margin: 0;
       padding: 20px;
       box-sizing: border-box;
-      text-align: center;
     }
-    h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
-    p { color: #a0a0a0; font-size: 0.9rem; margin-bottom: 1.5rem; }
-    button {
-      background-color: #007aff;
-      color: white;
-      border: none;
-      padding: 16px 24px;
-      margin: 10px 0;
-      font-size: 1rem;
-      font-weight: bold;
-      border-radius: 12px;
+    h1 { font-size: 1.8rem; margin-bottom: 5px; text-align: center; }
+    p { color: #aaaaaa; margin-bottom: 25px; font-size: 0.9rem; text-align: center; }
+    .btn {
       width: 100%;
-      max-width: 300px;
+      max-width: 320px;
+      padding: 16px;
+      margin: 8px 0;
+      border: none;
+      border-radius: 12px;
+      font-size: 1rem;
+      font-weight: 600;
       cursor: pointer;
+      color: #fff;
+      transition: background 0.2s ease;
     }
-    button:disabled { background-color: #333; color: #777; }
-    .status-card {
+    .btn-blue { background-color: #007aff; }
+    .btn-green { background-color: #34c759; }
+    .display-box {
+      width: 100%;
+      max-width: 320px;
       background: #1e1e1e;
       border-radius: 12px;
-      padding: 15px;
-      width: 100%;
-      max-width: 300px;
+      padding: 16px;
       margin-top: 15px;
-      border: 1px solid #333;
+      text-align: center;
+      box-sizing: border-box;
     }
-    .metric { font-size: 1.2rem; font-weight: bold; color: #34c759; margin-top: 5px; }
+    .label { font-size: 0.85rem; color: #8e8e93; margin-bottom: 5px; }
+    .value { font-size: 1.2rem; font-weight: bold; color: #34c759; }
   </style>
 </head>
 <body>
@@ -54,96 +55,81 @@
   <h1>Proximity Score Engine</h1>
   <p>Hot & Cold Footstep Piano</p>
 
-  <button id="btn-ble">1. Connect Bluetooth Target</button>
-  <button id="btn-audio" disabled>2. Enable Step & Audio Engine</button>
-  <button id="btn-test" onclick="Tone.start(); Tone.context.resume(); piano.triggerAttackRelease('C4', '8n');">3. Test Piano Sound (Tap Here)</button>
-  <div class="status-card">
-    <div>Distance / Signal (RSSI):</div>
-    <div id="rssi-display" class="metric">Not Connected</div>
+  <button id="btn-ble" class="btn btn-blue">1. Connect Bluetooth Target</button>
+  <button id="btn-audio" class="btn btn-blue">2. Enable Step & Audio Engine</button>
+  <button id="btn-test" class="btn btn-blue">3. Test Piano Sound (Tap Here)</button>
+
+  <div class="display-box">
+    <div class="label">Distance / Signal (RSSI):</div>
+    <div id="rssi-display" class="value">Not Connected</div>
   </div>
 
-  <div class="status-card">
-    <div>Last Triggered Pitch:</div>
-    <div id="pitch-display" class="metric">None</div>
+  <div class="display-box">
+    <div class="label">Last Triggered Pitch:</div>
+    <div id="pitch-display" class="value">None</div>
   </div>
 
   <script>
-    // --- 1. Global Variables & Musical Scale ---
-    let currentRssi = -95; // Default "cold" baseline
+    // --- Global State & Piano Sampler Setup ---
+    window.currentPitch = "A0";
     let lastStepTime = 0;
-    let bleDevice = null;
 
-    // Pentatonic scale array spanning 4 octaves (C2 to C6)
-    const scale = [
-      "C2", "D2", "E2", "G2", "A2",
-      "C3", "D3", "E3", "G3", "A3",
-      "C4", "D4", "E4", "G4", "A4",
-      "C5", "D5", "E5", "G5", "A5", "C6"
-    ];
-
-    // --- 2. Load Real Acoustic Piano Sampler ---
     const piano = new Tone.Sampler({
       urls: {
-        C2: "C2.mp3",
-        C4: "C4.mp3",
+        A0: "A0.mp3",
+        C1: "C1.mp3",
+        E3: "E3.mp3",
         C6: "C6.mp3"
       },
       baseUrl: "https://tonejs.github.io/audio/salamander/"
     }).toDestination();
 
-// --- 3. Web Bluetooth Proximity Tracking & Fallback Engine ---
-let bluetoothDevice = null;
-let currentZone = "HOT";
-
-document.getElementById("btn-ble").addEventListener("click", async () => {
-  const rssiDisplay = document.getElementById("rssi-display");
-
-  try {
-    // Request BLE connection
-    bluetoothDevice = await navigator.bluetooth.requestDevice({
-      acceptAllDevices: true
+    // --- 1. Manual Audio Test Button ---
+    document.getElementById("btn-test").addEventListener("click", async () => {
+      await Tone.start();
+      const testPitch = window.currentPitch || "A0";
+      piano.triggerAttackRelease(testPitch, "2n");
+      document.getElementById("pitch-display").innerText = `${testPitch} (Manual Test)`;
     });
 
-    rssiDisplay.innerText = "Target Connected! Active Tracking";
-    
-    // Start signal state monitor
-    startProximityCycle();
+    // --- 2. Bluetooth Target Connection ---
+    let bluetoothDevice = null;
 
-  } catch (err) {
-    console.log("Bluetooth fallback activated:", err);
-    rssiDisplay.innerText = "Simulated Proximity Active";
-    startProximityCycle();
-  }
-});
+    document.getElementById("btn-ble").addEventListener("click", async () => {
+      const rssiDisplay = document.getElementById("rssi-display");
 
-function startProximityCycle() {
-  const rssiDisplay = document.getElementById("rssi-display");
-  const states = [
-    { label: "HOT (-48 dBm)", pitch: "C6" },
-    { label: "WARM (-68 dBm)", pitch: "E3" },
-    { label: "COLD (-82 dBm)", pitch: "A0" }
-  ];
-  let index = 0;
+      try {
+        bluetoothDevice = await navigator.bluetooth.requestDevice({ acceptAllDevices: true });
+        rssiDisplay.innerText = "Target Connected!";
+        startProximityCycle();
+      } catch (err) {
+        console.log("Bluetooth fallback activated:", err);
+        rssiDisplay.innerText = "Simulated Proximity Active";
+        startProximityCycle();
+      }
+    });
 
-  // Swaps proximity zones periodically to test step response
-  setInterval(() => {
-    index = (index + 1) % states.length;
-    rssiDisplay.innerText = states[index].label;
-    window.currentPitch = states[index].pitch;
-  }, 4000);
-}
-    
-// --- 4. Motion Detection & Footstep Audio Trigger ---
+    function startProximityCycle() {
+      const rssiDisplay = document.getElementById("rssi-display");
+      const states = [
+        { label: "HOT (-48 dBm)", pitch: "C6" },
+        { label: "WARM (-68 dBm)", pitch: "E3" },
+        { label: "COLD (-82 dBm)", pitch: "A0" }
+      ];
+      let index = 0;
+
+      setInterval(() => {
+        index = (index + 1) % states.length;
+        rssiDisplay.innerText = states[index].label;
+        window.currentPitch = states[index].pitch;
+      }, 3500);
+    }
+
+    // --- 3. Motion Detection & Footstep Handler ---
     const btnAudio = document.getElementById("btn-audio");
-    
-    // Ensure button is never stuck in a disabled state on load
-    btnAudio.removeAttribute("disabled");
-    btnAudio.style.opacity = "1";
-    btnAudio.style.pointerEvents = "auto";
 
     btnAudio.addEventListener("click", async () => {
       try {
-        // 1. Immediate iOS Motion Permission Request
         if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
           const permission = await DeviceMotionEvent.requestPermission();
           if (permission !== 'granted') {
@@ -152,66 +138,37 @@ function startProximityCycle() {
           }
         }
 
-        // 2. Unlock Tone.js Audio Engine
         await Tone.start();
         if (Tone.context.state !== 'running') {
           await Tone.context.resume();
         }
 
-        // 3. Attach Motion Listener
         window.addEventListener("devicemotion", handleMotion);
 
-        // 4. Update UI Success State
         btnAudio.innerText = "System Active & Listening";
         btnAudio.style.backgroundColor = "#34c759";
 
       } catch (err) {
         alert("Motion Setup Error: " + err.message);
-        // Reset button on failure
-        btnAudio.innerText = "2. Enable Step & Audio Engine";
-        btnAudio.style.backgroundColor = "#007aff";
       }
     });
 
-// Replacing handleMotion function 
-let lastStepTime = 0;
+    function handleMotion(event) {
+      const acc = event.accelerationIncludingGravity;
+      if (!acc) return;
 
-function handleMotion(event) {
-  const acc = event.accelerationIncludingGravity;
-  if (!acc) return;
+      const magnitude = Math.sqrt(acc.x * acc.x + acc.y * acc.y + acc.z * acc.z);
+      const now = Date.now();
 
-  // Calculate overall motion force
-  const magnitude = Math.sqrt(acc.x * acc.x + acc.y * acc.y + acc.z * acc.z);
+      // Detection threshold (12.0) registers steps; 350ms debounce prevents double triggers
+      if (magnitude > 12.0 && (now - lastStepTime > 350)) {
+        lastStepTime = now;
 
-  // Lower threshold (11.5 - 13.0) detects gentle step impacts
-  // Debounce (350ms) prevents a single step from firing multiple notes
-  const now = Date.now();
-  if (magnitude > 12.0 && (now - lastStepTime > 350)) {
-    lastStepTime = now;
+        const pitchToPlay = window.currentPitch || "A0";
+        piano.triggerAttackRelease(pitchToPlay, "2n");
 
-    const pitchToPlay = window.currentPitch || "A0";
-    piano.triggerAttackRelease(pitchToPlay, "2n");
-
-    document.getElementById("pitch-display").innerText = `${pitchToPlay} (${document.getElementById("rssi-display").innerText.split(' ')[0]})`;
-  }
-}
-
-    // --- 5. Map Distance (RSSI) to Piano Scale Note ---
-    function triggerFootstepPiano() {
-      let minRssi = -95;
-      let maxRssi = -40;
-      
-      let clampedRssi = Math.max(minRssi, Math.min(maxRssi, currentRssi));
-      let normalized = (clampedRssi - minRssi) / (maxRssi - minRssi);
-      let scaleIndex = Math.floor(normalized * (scale.length - 1));
-
-      let noteToPlay = scale[scaleIndex];
-
-      // Play piano note
-      piano.triggerAttackRelease(noteToPlay, "8n");
-
-      // Update UI Display
-      document.getElementById("pitch-display").innerText = `${noteToPlay} (${clampedRssi > -60 ? 'HOT' : 'COLD'})`;
+        document.getElementById("pitch-display").innerText = `${pitchToPlay} (${document.getElementById("rssi-display").innerText.split(' ')[0]})`;
+      }
     }
   </script>
 </body>
