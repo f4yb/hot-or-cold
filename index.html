@@ -81,7 +81,10 @@
         E3: "E3.mp3",
         C6: "C6.mp3"
       },
-      baseUrl: "https://tonejs.github.io/audio/salamander/"
+      baseUrl: "https://tonejs.github.io/audio/salamander/",
+      onload: () => {
+        console.log("All piano samples loaded");
+      }
     }).toDestination();
 
     // --- 1. Manual Audio Test Button ---
@@ -167,7 +170,16 @@
 
         const pitchToPlay = window.currentPitch || "E3";
         const zoneName = window.currentZone || "WARM";
-        piano.triggerAttackRelease(pitchToPlay, "2n");
+
+      // Check if sampler is loaded before playing
+        if (piano.loaded){
+           piano.triggerAttackRelease(pitchToPlay, "2n");
+        } else {
+          // Have a fallback synth toneif for some reason the samples are still downloading
+          const synth = new.Tone.Synth().toDestination();
+          synth.triggerAttackRelease(pitchToPlay, "8n");
+        }
+       
 
         document.getElementById("pitch-display").innerText = `${pitchToPlay} (${zoneName})`;
       }
