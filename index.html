@@ -112,16 +112,17 @@
     function startProximityCycle() {
       const rssiDisplay = document.getElementById("rssi-display");
       const states = [
-        { label: "HOT (-48 dBm)", pitch: "C6" },
-        { label: "WARM (-68 dBm)", pitch: "E3" },
-        { label: "COLD (-82 dBm)", pitch: "A0" }
+        { label: "HOT (-48 dBm)", pitch: "C6", zone: "HOT" },
+        { label: "WARM (-68 dBm)", pitch: "E3", zone: "WARM" },
+        { label: "COLD (-82 dBm)", pitch: "A0", zone: "COLD" }
       ];
       let index = 0;
 
       setInterval(() => {
         index = (index + 1) % states.length;
-        rssiDisplay.innerText = states[index].label;
+        rssiDisplay.innerText = `${states[index].zone} (${states[index].label.split(' ')[1]})`;
         window.currentPitch = states[index].pitch;
+        window.currentZone = states[index].zone;
       }, 3500);
     }
 
@@ -164,10 +165,11 @@
       if (magnitude > 12.0 && (now - lastStepTime > 350)) {
         lastStepTime = now;
 
-        const pitchToPlay = window.currentPitch || "A0";
+        const pitchToPlay = window.currentPitch || "E3";
+        const zoneName = window.currentZone || "WARM";
         piano.triggerAttackRelease(pitchToPlay, "2n");
 
-        document.getElementById("pitch-display").innerText = `${pitchToPlay} (${document.getElementById("rssi-display").innerText.split(' ')[0]})`;
+        document.getElementById("pitch-display").innerText = `${pitchToPlay} (${zoneName})`;
       }
     }
   </script>
