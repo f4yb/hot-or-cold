@@ -119,9 +119,9 @@ document.getElementById("btn-ble").addEventListener("click", async () => {
 function startProximityCycle() {
   const rssiDisplay = document.getElementById("rssi-display");
   const states = [
-    { label: "HOT (-48 dBm)", pitch: "C5" },
-    { label: "WARM (-68 dBm)", pitch: "G4" },
-    { label: "COLD (-82 dBm)", pitch: "C4" }
+    { label: "HOT (-48 dBm)", pitch: "C6" },
+    { label: "WARM (-68 dBm)", pitch: "E3" },
+    { label: "COLD (-82 dBm)", pitch: "A0" }
   ];
   let index = 0;
 
@@ -180,10 +180,10 @@ function handleMotion(event) {
   const magnitude = Math.sqrt(acc.x * acc.x + acc.y * acc.y + acc.z * acc.z);
   
   if (magnitude > 15) { // Physical step detection
-    const pitchToPlay = window.currentPitch || "C2";
+    const pitchToPlay = window.currentPitch || "A0";
     
     // Play with a distinct octave punch
-    piano.triggerAttackRelease(pitchToPlay, "4n");
+    piano.triggerAttackRelease(pitchToPlay, "2n");
     
     // Update display
     document.getElementById("pitch-display").innerText = `${pitchToPlay} (${document.getElementById("rssi-display").innerText.split(' ')[0]})`;
