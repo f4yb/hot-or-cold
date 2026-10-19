@@ -66,41 +66,37 @@
 
   <div class="display-box">
     <div class="label">Last Triggered Pitch:</div>
-    <div id="pitch-display" class="value">None</div>
+    <div id="pitch-display" class="value">Loading Piano...</div>
   </div>
 
   <script>
     // --- Global State & Audio Setup ---
-    window.currentPitch = "E3";
+    window.currentPitch = "G4";
     window.currentZone = "WARM";
     let lastStepTime = 0;
+
+    // Boost overall volume slightly (+6dB) for small tablet speakers
+    const volumeNode = new Tone.Volume(6).toDestination();
 
     // Primary Piano Sampler
     const piano = new Tone.Sampler({
       urls: {
-        A0: "A0.mp3",
-        C1: "C1.mp3",
-        E3: "E3.mp3",
-        C6: "C6.mp3"
+        C2: "C2.mp3", // Deep bass for COLD (audible on iPad speakers)
+        G4: "G4.mp3", // Solid middle note for WARM
+        C6: "C6.mp3"  // Bright ping for HOT
       },
       baseUrl: "https://tonejs.github.io/audio/salamander/",
       onload: () => {
-        console.log("All piano samples loaded");
+        // Updates display once all piano files finish downloading!
+        document.getElementById("pitch-display").innerText = "Piano Ready!";
       }
-    }).toDestination();
-
-    // Secondary Fallback Synth (for immediate sound before samples load)
-    const fallbackSynth = new Tone.Synth().toDestination();
+    }).connect(volumeNode);
 
     // --- 1. Manual Audio Test Button ---
     document.getElementById("btn-test").addEventListener("click", async () => {
       await Tone.start();
-      const testPitch = window.currentPitch || "E3";
-      if (piano.loaded) {
-        piano.triggerAttackRelease(testPitch, "2n");
-      } else {
-        fallbackSynth.triggerAttackRelease(testPitch, "8n");
-      }
+      const testPitch = window.currentPitch || "G4";
+      piano.triggerAttackRelease(testPitch, "2n");
       document.getElementById("pitch-display").innerText = `${testPitch} (Manual Test)`;
     });
 
@@ -125,8 +121,8 @@
       const rssiDisplay = document.getElementById("rssi-display");
       const states = [
         { label: "HOT (-48 dBm)", pitch: "C6", zone: "HOT" },
-        { label: "WARM (-68 dBm)", pitch: "E3", zone: "WARM" },
-        { label: "COLD (-82 dBm)", pitch: "A0", zone: "COLD" }
+        { label: "WARM (-68 dBm)", pitch: "G4", zone: "WARM" },
+        { label: "COLD (-82 dBm)", pitch: "C2", zone: "COLD" }
       ];
       let index = 0;
 
@@ -177,16 +173,11 @@
       if (magnitude > 12.0 && (now - lastStepTime > 350)) {
         lastStepTime = now;
 
-        const pitchToPlay = window.currentPitch || "E3";
+        const pitchToPlay = window.currentPitch || "G4";
         const zoneName = window.currentZone || "WARM";
 
-         piano.triggerAttackRelease(pitchToPlay, "2n");
-
-        // if (piano.loaded) {
-        //   piano.triggerAttackRelease(pitchToPlay, "2n");
-        // } else {
-        //   fallbackSynth.triggerAttackRelease(pitchToPlay, "8n");
-        // }
+        // Plays rich acoustic piano note directly
+        piano.triggerAttackRelease(pitchToPlay, "2n");
 
         document.getElementById("pitch-display").innerText = `${pitchToPlay} (${zoneName})`;
       }
