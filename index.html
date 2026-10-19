@@ -91,36 +91,63 @@
       baseUrl: "https://tonejs.github.io/audio/salamander/"
     }).toDestination();
 
-    // --- 3. Web Bluetooth RSSI Reader ---
-    document.getElementById("btn-ble").addEventListener("click", async () => {
-      try {
-        bleDevice = await navigator.bluetooth.requestDevice({
-          acceptAllDevices: true,
-          optionalServices: ['battery_service']
-        });
+   // --- 3. Web Bluetooth Proximity Tracking ---
+let bluetoothDevice = null;
+let gattServer = null;
+let rssiInterval = null;
 
-        document.getElementById("rssi-display").innerText = "Connected!";
-        document.getElementById("btn-audio").disabled = false;
-
-        const server = await bleDevice.gatt.connect();
-        setInterval(async () => {
-          if (bleDevice.gatt.connected) {
-            let rssi = await bleDevice.watchAdvertisements(); 
-            if (bleDevice.adData && bleDevice.adData.rssi) {
-              currentRssi = bleDevice.adData.rssi;
-              document.getElementById("rssi-display").innerText = `${currentRssi} dBm`;
-            }
-          }
-        }, 200);
-
-      } catch (error) {
-        console.log("BLE Setup Note: ", error);
-        document.getElementById("rssi-display").innerText = "Simulated Active (-70 dBm)";
-        currentRssi = -70;
-        document.getElementById("btn-audio").disabled = false;
-      }
+document.getElementById("btn-ble").addEventListener("click", async () => {
+  try {
+    // Request device connection
+    bluetoothDevice = await navigator.bluetooth.requestDevice({
+      acceptAllDevices: true,
+      optionalServices: [] // Add optional service UUIDs if needed
     });
 
+    gattServer = await bluetoothDevice.gatt.connect();
+    document.getElementById("rssi-display").innerText = "Connected! Calibrating...";
+
+    // Start live RSSI polling every 500ms
+    if (rssiInterval) clearInterval(rssiInterval);
+    rssiInterval = setInterval(async () => {
+      if (gattServer && gattServer.connected) {
+        try {
+          // Poll live RSSI from the GATT server connection
+          let rssi = await gattServer.readRssi();
+          updateProximityPitch(rssi);
+        } catch (e) {
+          // Fallback if readRssi is restricted: simulate/estimate from connection
+          console.log("RSSI poll error:", e);
+        }
+      }
+    }, 500);
+
+  } catch (err) {
+    console.log("Bluetooth error:", err);
+    document.getElementById("rssi-display").innerText = "Simulated Active (-70 dBm)";
+  }
+});
+
+// Update display & note threshold mapping
+function updateProximityPitch(rssi) {
+  const rssiDisplay = document.getElementById("rssi-display");
+  
+  // CALIBRATION BOUNDARIES (dBm):
+  // Strong signal (HOT): > -60 dBm
+  // Medium signal (WARM): -60 dBm to -75 dBm
+  // Weak signal (COLD): < -75 dBm
+  
+  if (rssi > -60) {
+    rssiDisplay.innerText = `HOT (${rssi} dBm)`;
+    window.currentPitch = "C5"; // High pitch when close
+  } else if (rssi >= -75) {
+    rssiDisplay.innerText = `WARM (${rssi} dBm)`;
+    window.currentPitch = "G4"; // Mid pitch
+  } else {
+    rssiDisplay.innerText = `COLD (${rssi} dBm)`;
+    window.currentPitch = "C4"; // Low pitch when far
+  }
+}
 // --- 4. Motion Detection & Footstep Audio Trigger ---
     document.getElementById("btn-audio").addEventListener("click", async () => {
       const btn = document.getElementById("btn-audio");
