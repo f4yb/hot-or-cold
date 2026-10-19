@@ -173,19 +173,22 @@ function startProximityCycle() {
       }
     });
 
-    function handleMotion(event) {
-      let acc = event.accelerationIncludingGravity || event.acceleration;
-      if (!acc || acc.x === null) return;
+function handleMotion(event) {
+  const acc = event.accelerationIncludingGravity;
+  if (!acc) return;
 
-      // Calculate force vector
-      let totalForce = Math.sqrt(acc.x * acc.x + acc.y * acc.y + acc.z * acc.z);
-
-      // Sensitive threshold for iPad movement (> 3.0 m/s^2 delta) with 250ms cooldown
-      if (Math.abs(totalForce - 9.8) > 3.0 && (Date.now() - lastStepTime) > 250) {
-        lastStepTime = Date.now();
-        triggerFootstepPiano();
-      }
-    }
+  const magnitude = Math.sqrt(acc.x * acc.x + acc.y * acc.y + acc.z * acc.z);
+  
+  if (magnitude > 15) { // Physical step detection
+    const pitchToPlay = window.currentPitch || "C2";
+    
+    // Play with a distinct octave punch
+    piano.triggerAttackRelease(pitchToPlay, "4n");
+    
+    // Update display
+    document.getElementById("pitch-display").innerText = `${pitchToPlay} (${document.getElementById("rssi-display").innerText.split(' ')[0]})`;
+  }
+}
 
     // --- 5. Map Distance (RSSI) to Piano Scale Note ---
     function triggerFootstepPiano() {
