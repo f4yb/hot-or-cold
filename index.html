@@ -70,10 +70,12 @@
   </div>
 
   <script>
-    // --- Global State & Piano Sampler Setup ---
-    window.currentPitch = "A0";
+    // --- Global State & Audio Setup ---
+    window.currentPitch = "E3";
+    window.currentZone = "WARM";
     let lastStepTime = 0;
 
+    // Primary Piano Sampler
     const piano = new Tone.Sampler({
       urls: {
         A0: "A0.mp3",
@@ -87,11 +89,18 @@
       }
     }).toDestination();
 
+    // Secondary Fallback Synth (for immediate sound before samples load)
+    const fallbackSynth = new Tone.Synth().toDestination();
+
     // --- 1. Manual Audio Test Button ---
     document.getElementById("btn-test").addEventListener("click", async () => {
       await Tone.start();
-      const testPitch = window.currentPitch || "A0";
-      piano.triggerAttackRelease(testPitch, "2n");
+      const testPitch = window.currentPitch || "E3";
+      if (piano.loaded) {
+        piano.triggerAttackRelease(testPitch, "2n");
+      } else {
+        fallbackSynth.triggerAttackRelease(testPitch, "8n");
+      }
       document.getElementById("pitch-display").innerText = `${testPitch} (Manual Test)`;
     });
 
@@ -171,15 +180,11 @@
         const pitchToPlay = window.currentPitch || "E3";
         const zoneName = window.currentZone || "WARM";
 
-      // Check if sampler is loaded before playing
-        if (piano.loaded){
-           piano.triggerAttackRelease(pitchToPlay, "2n");
+        if (piano.loaded) {
+          piano.triggerAttackRelease(pitchToPlay, "2n");
         } else {
-          // Have a fallback synth toneif for some reason the samples are still downloading
-          const synth = new.Tone.Synth().toDestination();
-          synth.triggerAttackRelease(pitchToPlay, "8n");
+          fallbackSynth.triggerAttackRelease(pitchToPlay, "8n");
         }
-       
 
         document.getElementById("pitch-display").innerText = `${pitchToPlay} (${zoneName})`;
       }
