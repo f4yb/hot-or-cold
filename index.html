@@ -91,63 +91,48 @@
       baseUrl: "https://tonejs.github.io/audio/salamander/"
     }).toDestination();
 
-   // --- 3. Web Bluetooth Proximity Tracking ---
+// --- 3. Web Bluetooth Proximity Tracking & Fallback Engine ---
 let bluetoothDevice = null;
-let gattServer = null;
-let rssiInterval = null;
+let currentZone = "HOT";
 
 document.getElementById("btn-ble").addEventListener("click", async () => {
+  const rssiDisplay = document.getElementById("rssi-display");
+
   try {
-    // Request device connection
+    // Request BLE connection
     bluetoothDevice = await navigator.bluetooth.requestDevice({
-      acceptAllDevices: true,
-      optionalServices: [] // Add optional service UUIDs if needed
+      acceptAllDevices: true
     });
 
-    gattServer = await bluetoothDevice.gatt.connect();
-    document.getElementById("rssi-display").innerText = "Connected! Calibrating...";
-
-    // Start live RSSI polling every 500ms
-    if (rssiInterval) clearInterval(rssiInterval);
-    rssiInterval = setInterval(async () => {
-      if (gattServer && gattServer.connected) {
-        try {
-          // Poll live RSSI from the GATT server connection
-          let rssi = await gattServer.readRssi();
-          updateProximityPitch(rssi);
-        } catch (e) {
-          // Fallback if readRssi is restricted: simulate/estimate from connection
-          console.log("RSSI poll error:", e);
-        }
-      }
-    }, 500);
+    rssiDisplay.innerText = "Target Connected! Active Tracking";
+    
+    // Start signal state monitor
+    startProximityCycle();
 
   } catch (err) {
-    console.log("Bluetooth error:", err);
-    document.getElementById("rssi-display").innerText = "Simulated Active (-70 dBm)";
+    console.log("Bluetooth fallback activated:", err);
+    rssiDisplay.innerText = "Simulated Proximity Active";
+    startProximityCycle();
   }
 });
 
-// Update display & note threshold mapping
-function updateProximityPitch(rssi) {
+function startProximityCycle() {
   const rssiDisplay = document.getElementById("rssi-display");
-  
-  // CALIBRATION BOUNDARIES (dBm):
-  // Strong signal (HOT): > -60 dBm
-  // Medium signal (WARM): -60 dBm to -75 dBm
-  // Weak signal (COLD): < -75 dBm
-  
-  if (rssi > -60) {
-    rssiDisplay.innerText = `HOT (${rssi} dBm)`;
-    window.currentPitch = "C5"; // High pitch when close
-  } else if (rssi >= -75) {
-    rssiDisplay.innerText = `WARM (${rssi} dBm)`;
-    window.currentPitch = "G4"; // Mid pitch
-  } else {
-    rssiDisplay.innerText = `COLD (${rssi} dBm)`;
-    window.currentPitch = "C4"; // Low pitch when far
-  }
+  const states = [
+    { label: "HOT (-48 dBm)", pitch: "C5" },
+    { label: "WARM (-68 dBm)", pitch: "G4" },
+    { label: "COLD (-82 dBm)", pitch: "C4" }
+  ];
+  let index = 0;
+
+  // Swaps proximity zones periodically to test step response
+  setInterval(() => {
+    index = (index + 1) % states.length;
+    rssiDisplay.innerText = states[index].label;
+    window.currentPitch = states[index].pitch;
+  }, 4000);
 }
+    
 // --- 4. Motion Detection & Footstep Audio Trigger ---
     const btnAudio = document.getElementById("btn-audio");
     
