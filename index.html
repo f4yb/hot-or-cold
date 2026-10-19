@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Proximity Digital Score Prototype</title>
+  <!-- Load Tone.js Audio Framework -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: #121212;
+      color: #ffffff;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+      padding: 20px;
+      box-sizing: border-box;
+      text-align: center;
+    }
+    h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+    p { color: #a0a0a0; font-size: 0.9rem; margin-bottom: 1.5rem; }
+    button {
+      background-color: #007aff;
+      color: white;
+      border: none;
+      padding: 16px 24px;
+      margin: 10px 0;
+      font-size: 1rem;
+      font-weight: bold;
+      border-radius: 12px;
+      width: 100%;
+      max-width: 300px;
+      cursor: pointer;
+    }
+    button:disabled { background-color: #333; color: #777; }
+    .status-card {
+      background: #1e1e1e;
+      border-radius: 12px;
+      padding: 15px;
+      width: 100%;
+      max-width: 300px;
+      margin-top: 15px;
+      border: 1px solid #333;
+    }
+    .metric { font-size: 1.2rem; font-weight: bold; color: #34c759; margin-top: 5px; }
+  </style>
+</head>
+<body>
+
+  <h1>Proximity Score Engine</h1>
+  <p>Hot & Cold Footstep Piano</p>
+
+  <button id="btn-ble">1. Connect Bluetooth Target</button>
+  <button id="btn-audio" disabled>2. Enable Step & Audio Engine</button>
+  <button id="btn-test" onclick="Tone.start(); Tone.context.resume(); piano.triggerAttackRelease('C4', '8n');">3. Test Piano Sound (Tap Here)</button>
+  <div class="status-card">
+    <div>Distance / Signal (RSSI):</div>
+    <div id="rssi-display" class="metric">Not Connected</div>
+  </div>
+
+  <div class="status-card">
+    <div>Last Triggered Pitch:</div>
+    <div id="pitch-display" class="metric">None</div>
+  </div>
+
+  <script>
+    // --- 1. Global Variables & Musical Scale ---
+    let currentRssi = -95; // Default "cold" baseline
+    let lastStepTime = 0;
+    let bleDevice = null;
+
+    // Pentatonic scale array spanning 4 octaves (C2 to C6)
+    const scale = [
+      "C2", "D2", "E2", "G2", "A2",
+      "C3", "D3", "E3", "G3", "A3",
+      "C4", "D4", "E4", "G4", "A4",
+      "C5", "D5", "E5", "G5", "A5", "C6"
+    ];
+
+    // --- 2. Load Real Acoustic Piano Sampler ---
+    const piano = new Tone.Sampler({
+      urls: {
+        C2: "C2.mp3",
+        C4: "C4.mp3",
+        C6: "C6.mp3"
+      },
+      baseUrl: "https://tonejs.github.io/audio/salamander/"
+    }).toDestination();
+
+    // --- 3. Web Bluetooth RSSI Reader ---
+    document.getElementById("btn-ble").addEventListener("click", async () => {
+      try {
+        bleDevice = await navigator.bluetooth.requestDevice({
+          acceptAllDevices: true,
+          optionalServices: ['battery_service']
+        });
+
+        document.getElementById("rssi-display").innerText = "Connected!";
+        document.getElementById("btn-audio").disabled = false;
+
+        const server = await bleDevice.gatt.connect();
+        setInterval(async () => {
+          if (bleDevice.gatt.connected) {
+            let rssi = await bleDevice.watchAdvertisements(); 
+            if (bleDevice.adData && bleDevice.adData.rssi) {
+              currentRssi = bleDevice.adData.rssi;
+              document.getElementById("rssi-display").innerText = `${currentRssi} dBm`;
+            }
+          }
+        }, 200);
+
+      } catch (error) {
+        console.log("BLE Setup Note: ", error);
+        document.getElementById("rssi-display").innerText = "Simulated Active (-70 dBm)";
+        currentRssi = -70;
+        document.getElementById("btn-audio").disabled = false;
+      }
+    });
+
+// --- 4. Motion Detection & Footstep Audio Trigger ---
+    document.getElementById("btn-audio").addEventListener("click", async () => {
+      const btn = document.getElementById("btn-audio");
+
+      try {
+        // Step A: Immediate permission call (synchronous with touch event)
+        if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+          const permission = await DeviceMotionEvent.requestPermission();
+          if (permission !== 'granted') {
+            alert('Motion sensor permission was denied.');
+            return;
+          }
+        }
+
+        // Step B: Unlock Web Audio Context
+        await Tone.start();
+        if (Tone.context.state !== 'running') {
+          await Tone.context.resume();
+        }
+
+        // Step C: Attach Listener & Update UI
+        window.addEventListener("devicemotion", handleMotion);
+        btn.innerText = "System Active & Listening";
+        btn.style.backgroundColor = "#34c759";
+
+      } catch (err) {
+        alert("Setup Error: " + err.message);
+      }
+    });
+
+    function handleMotion(event) {
+      let acc = event.accelerationIncludingGravity || event.acceleration;
+      if (!acc || acc.x === null) return;
+
+      // Calculate force vector
+      let totalForce = Math.sqrt(acc.x * acc.x + acc.y * acc.y + acc.z * acc.z);
+
+      // Sensitive threshold for iPad movement (> 3.0 m/s^2 delta) with 250ms cooldown
+      if (Math.abs(totalForce - 9.8) > 3.0 && (Date.now() - lastStepTime) > 250) {
+        lastStepTime = Date.now();
+        triggerFootstepPiano();
+      }
+    }
+
+    // --- 5. Map Distance (RSSI) to Piano Scale Note ---
+    function triggerFootstepPiano() {
+      let minRssi = -95;
+      let maxRssi = -40;
+      
+      let clampedRssi = Math.max(minRssi, Math.min(maxRssi, currentRssi));
+      let normalized = (clampedRssi - minRssi) / (maxRssi - minRssi);
+      let scaleIndex = Math.floor(normalized * (scale.length - 1));
+
+      let noteToPlay = scale[scaleIndex];
+
+      // Play piano note
+      piano.triggerAttackRelease(noteToPlay, "8n");
+
+      // Update UI Display
+      document.getElementById("pitch-display").innerText = `${noteToPlay} (${clampedRssi > -60 ? 'HOT' : 'COLD'})`;
+    }
+  </script>
+</body>
+</html>
