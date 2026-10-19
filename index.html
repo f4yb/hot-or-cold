@@ -180,11 +180,13 @@
         const pitchToPlay = window.currentPitch || "E3";
         const zoneName = window.currentZone || "WARM";
 
-        if (piano.loaded) {
-          piano.triggerAttackRelease(pitchToPlay, "2n");
-        } else {
-          fallbackSynth.triggerAttackRelease(pitchToPlay, "8n");
-        }
+         piano.triggerAttackRelease(pitchToPlay, "2n");
+
+        // if (piano.loaded) {
+        //   piano.triggerAttackRelease(pitchToPlay, "2n");
+        // } else {
+        //   fallbackSynth.triggerAttackRelease(pitchToPlay, "8n");
+        // }
 
         document.getElementById("pitch-display").innerText = `${pitchToPlay} (${zoneName})`;
       }
