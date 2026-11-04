@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Digital Score: Mixed Reality Prototype</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+<style>
+  [hidden] { display: none !important; }
+  body { font-family: Arial, sans-serif; text-align: center; padding: 20px; background: #1b365d; color: white; margin: 0; }
+  .card { background: white; color: #2c3e50; padding: 20px; border-radius: 8px; max-width: 460px; margin: 20px auto; box-shadow: 0 4px 15px rgba(0,0,0,.3); }
+  button { padding: 12px 22px; font-size: 16px; margin: 6px; cursor: pointer; background: #e74c3c; color: white; border: none; border-radius: 4px; font-weight: bold; touch-action: none; user-select: none; }
+  button:hover { background: #c0392b; }
+  .nav { background: #2980b9; min-width: 80px; }
+  .nav:hover { background: #1f618d; }
+  #status { font-size: 17px; font-weight: bold; margin: 12px 0; }
+  canvas { background: #f4f6f8; border-radius: 6px; max-width: 100%; }
+</style>
+</head>
+<body>
+<h1>The Digital Score</h1>
+
+<div class="card" id="roles">
+  <h3>Select your device role</h3>
+  <p>Open this https page on each device (same Wi-Fi).</p>
+  <button onclick="join('seeker')">Seeker (headphones)</button><br>
+  <button onclick="join('hider')">Hider</button>
+  <button onclick="join('spectator')">Spectator</button>
+</div>
+
+<div class="card" id="play" hidden>
+  <h2 id="title"></h2>
+  <p id="status"></p>
+  <canvas id="map" width="400" height="320" hidden></canvas>
+  <div id="sensors" hidden>
+    <button id="sensorBtn" onclick="enableSensors()">Enable walking sensors</button><br>
+    <button onclick="calibrate()">Set start: stand in room centre, face the top wall</button>
+    <p id="sensorInfo" style="font-size:14px"></p>
+  </div>
+  <div id="pad" hidden>
+    <button class="nav" data-dx="0" data-dy="1">&#9650; N</button><br>
+    <button class="nav" data-dx="-1" data-dy="0">&#9664; W</button>
+    <button class="nav" data-dx="1" data-dy="0">E &#9654;</button><br>
+    <button class="nav" data-dx="0" data-dy="-1">&#9660; S</button>
+    <p id="runRow"><label><input type="checkbox" id="run"> Run (faster tempo)</label></p>
+  </div>
+  <button id="resetBtn" hidden onclick="socket.emit('reset')">Reset round</button>
+</div>
+
+<script>
+const socket = io();
+const $ = id => document.getElementById(id);
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const midi = m => 440 * Math.pow(2, (m - 69) / 12);
+
+// ---- Tunable score parameters ------------------------------------------------
+const BPM_MIN = 60, BPM_MAX = 120;          // tempo range
+const SPEED_MIN = 0.3, SPEED_MAX = 2.1;     // m/s that map to BPM_MIN .. BPM_MAX
+const MAX_AUDIBLE = 12;                      // metres: beyond this a hider is near-silent
+const BOUNDARY_DIST = 1.2;                   // metres from a wall where boundary chords start
+const WALK = 1.2, RUN = 2.4, HIDER_SPEED = 0.6;   // m/s for simulated movement
+const STEP_LEN = 0.7;          // metres per step (calibrate for the walker)
+const STEP_THRESH = 1.2;       // m/s^2 accel peak that counts as a step (tune on a real phone)
+const STEP_MIN_MS = 350;       // ignore peaks closer together than this
+const COLORS = ['#f1c40f', '#e74c3c', '#2ecc71'];
+const NAMES = ['Piano', 'Violin', 'Bell'];
+
+// Distance level -> chord (MIDI notes). C2 drone is always-on underneath.
+// level 0: >7m drone only | 1: C3 | 2: C3 E3 | 3: C3 E3 G3 | 4: richer voicing
+const CHORDS = [[], [48], [48, 52], [48, 52, 55], [48, 52, 55, 60, 64]];
+const EVERY = [0, 4, 2, 1, 1];   // closer = denser rhythm (in arpeggio steps)
+const levelFor = d => d > 7 ? 0 : d > 4.5 ? 1 : d > 2.5 ? 2 : d > 1 ? 3 : 4;
+
+// ---- Timbres: each hider gets one. All draw from the same C major chord tones ----
+const TIMBRES = [
+  // 0: piano-like (percussive)
+  (c, t, f, dur, dest) => {
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.5, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 1.0);
+    g.connect(dest);
+    [[1, 'triangle', 1], [2, 'sine', 0.3]].forEach(([mult, type, amp]) => {
+      const o = c.createOscillator(), og = c.createGain();
+      o.type = type; o.frequency.value = f * mult; og.gain.value = amp;
+      o.connect(og); og.connect(g); o.start(t); o.stop(t + 1.05);
+    });
+  },
+  // 1: violin-like (slow attack, sustained, vibrato)
+  (c, t, f, dur, dest) => {
+    const len = dur * 1.5;
+    const g = c.createGain(), lp = c.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = 2400;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.35, t + 0.12);
+    g.gain.setValueAtTime(0.35, t + len);
+    g.gain.linearRampToValueAtTime(0.0001, t + len + 0.15);
+    const o = c.createOscillator(); o.type = 'sawtooth'; o.frequency.value = f;
+    const lfo = c.createOscillator(), lfoGain = c.createGain();
+    lfo.frequency.value = 5.5; lfoGain.gain.value = 8;     // +/-8 cents vibrato
+    lfo.connect(lfoGain); lfoGain.connect(o.detune);
+    o.connect(lp); lp.connect(g); g.connect(dest);
+    o.start(t); lfo.start(t); o.stop(t + len + 0.2); lfo.stop(t + len + 0.2);
+  },
+  // 2: bell-like (inharmonic partial, long ring)
+  (c, t, f, dur, dest) => {
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.4, t + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 1.5);
+    g.connect(dest);
+    [[1, 1], [2.76, 0.4]].forEach(([mult, amp]) => {
+      const o = c.createOscillator(), og = c.createGain();
+      o.frequency.value = f * mult; og.gain.value = amp;
+      o.connect(og); og.connect(g); o.start(t); o.stop(t + 1.55);
+    });
+  },
+];
+
+// ---- Audio engine: a lookahead scheduler so timing is sample-accurate ---------
+class Engine {
+  constructor() {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    this.ctx = new AC();
+    this.master = this.ctx.createGain();
+    this.master.gain.value = 0.8;
+    const comp = this.ctx.createDynamicsCompressor();
+    this.master.connect(comp); comp.connect(this.ctx.destination);
+    this.buses = new Map();
+    this.boundary = this.makeBus(1);
+    this.bpm = BPM_MIN; this.step = 0; this.nextTime = 0;
+  }
+
+  makeBus(vol) {
+    const c = this.ctx;
+    const input = c.createGain(); input.gain.value = vol;
+    const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 6000;
+    const pan = c.createStereoPanner();
+    input.connect(lp); lp.connect(pan); pan.connect(this.master);
+    return { input, lp, pan };
+  }
+
+  getBus(id) {
+    let b = this.buses.get(id);
+    if (!b) {
+      const c = this.ctx;
+      b = this.makeBus(0);
+      b.droneGain = c.createGain(); b.droneGain.gain.value = 0.5;
+      b.droneGain.connect(b.input);
+      b.oscs = [[65.41, 'sine'], [65.41 * 1.004, 'triangle']].map(([f, type]) => {
+        const o = c.createOscillator(); o.type = type; o.frequency.value = f;
+        o.connect(b.droneGain); o.start(); return o;     // C2 drone, slight detune for warmth
+      });
+      this.buses.set(id, b);
+    }
+    return b;
+  }
+
+  start() {
+    this.ctx.resume();
+    this.nextTime = this.ctx.currentTime + 0.1;
+    this.timer = setInterval(() => this.schedule(), 25);
+  }
+
+  rel(pose, h) {
+    const dx = h.x - pose.x, dy = h.y - pose.y;
+    const a = Math.atan2(dx, dy) - pose.heading;     // bearing relative to facing direction
+    return { d: Math.hypot(dx, dy), pan: Math.sin(a), front: Math.cos(a) };
+  }
+
+  // Continuous layer: volume, panning and brightness follow the seeker smoothly
+  updateBuses(pose) {
+    const now = this.ctx.currentTime;
+    const ids = new Set(world.hiders.map(h => h.id));
+    for (const [id, b] of this.buses) {
+      if (!ids.has(id)) { b.oscs.forEach(o => o.stop()); b.pan.disconnect(); this.buses.delete(id); }
+    }
+    for (const h of world.hiders) {
+      const b = this.getBus(h.id);
+      if (h.found) { b.input.gain.setTargetAtTime(0, now, 0.1); continue; }
+      const { d, pan, front } = this.rel(pose, h);
+      const vol = 0.05 + 0.4 * Math.pow(1 - clamp(d / MAX_AUDIBLE, 0, 1), 1.5);
+      b.input.gain.setTargetAtTime(vol, now, 0.08);
+      b.pan.pan.setTargetAtTime(clamp(pan, -1, 1), now, 0.05);
+      b.lp.frequency.setTargetAtTime(1500 + 4500 * (front + 1) / 2, now, 0.1);   // behind = darker
+      b.droneGain.gain.setTargetAtTime(levelFor(d) === 0 ? 0.5 : 0.2, now, 0.3);
+    }
+  }
+
+  schedule() {
+    if (!world || !world.hiders) return;
+    const pose = getPose();
+    if (this.nextTime < this.ctx.currentTime) this.nextTime = this.ctx.currentTime + 0.05;
+    this.updateBuses(pose);
+    while (this.nextTime < this.ctx.currentTime + 0.12) {
+      this.scheduleStep(this.nextTime, this.step, pose);
+      // Ramp tempo toward target and change it only at step boundaries (no jarring jumps)
+      const target = BPM_MIN + clamp((pose.speed - SPEED_MIN) / (SPEED_MAX - SPEED_MIN), 0, 1) * (BPM_MAX - BPM_MIN);
+      this.bpm += (target - this.bpm) * 0.25;
+      this.nextTime += 60 / this.bpm / 2;       // eighth-note steps
+      this.step++;
+    }
+  }
+
+  scheduleStep(t, step, pose) {
+    const stepDur = 60 / this.bpm / 2;
+    const k = Math.floor(step / 2);
+
+    // Hider voices: interlocking counterpoint (odd ids on even steps, even ids on off-steps)
+    for (const h of world.hiders) {
+      if (h.found) continue;
+      const { d } = this.rel(pose, h);
+      const level = levelFor(d), chord = CHORDS[level];
+      if (!chord.length || k % EVERY[level] !== 0) continue;
+      const mine = h.id % 2 === 1;
+      if ((step % 2 === 0) !== mine) continue;
+      const n = chord.length, idx = mine ? (k + h.id) % n : n - 1 - ((k + h.id) % n);
+      const note = chord[idx] + (mine ? 0 : 12);
+      TIMBRES[h.timbre](this.ctx, t, midi(note), stepDur, this.getBus(h.id).input);
+    }
+
+    // Boundary layer: dissonant minor second near a wall, sub-bass drop at/over the edge
+    const W = room.w, H = room.h;
+    const walls = [
+      { d: pose.x, vx: -1, vy: 0 }, { d: W - pose.x, vx: 1, vy: 0 },
+      { d: pose.y, vx: 0, vy: -1 }, { d: H - pose.y, vx: 0, vy: 1 },
+    ];
+    const w = walls.reduce((a, b) => (b.d < a.d ? b : a));
+    if (w.d < BOUNDARY_DIST) {
+      const sev = clamp(1 - w.d / BOUNDARY_DIST, 0, 1);
+      if (sev > 0.5 || step % 2 === 0) {
+        this.boundary.pan.pan.setValueAtTime(Math.sin(Math.atan2(w.vx, w.vy) - pose.heading), t);
+        this.dyad(t, stepDur, 0.06 + 0.25 * sev);
+      }
+      if (w.d < 0.25 && step % 4 === 0) this.subDrop(t);
+    }
+  }
+
+  dyad(t, dur, vol) {
+    const c = this.ctx, g = c.createGain(), lp = c.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = 700;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(vol, t + 0.02);
+    g.gain.linearRampToValueAtTime(0.0001, t + dur * 0.9);
+    lp.connect(g); g.connect(this.boundary.input);
+    [midi(48), midi(49)].forEach(f => {          // C3 + Db3 = minor second
+      const o = c.createOscillator(); o.type = 'sawtooth'; o.frequency.value = f;
+      o.connect(lp); o.start(t); o.stop(t + dur);
+    });
+  }
+
+  subDrop(t) {
+    const c = this.ctx, o = c.createOscillator(), g = c.createGain();
+    o.frequency.setValueAtTime(90, t);
+    o.frequency.exponentialRampToValueAtTime(35, t + 0.45);
+    g.gain.setValueAtTime(0.6, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
+    o.connect(g); g.connect(this.boundary.input);
+    o.start(t); o.stop(t + 0.55);
+  }
+
+  celebrate() {                                   // "found" fanfare: C major arpeggio
+    const t = this.ctx.currentTime + 0.05;
+    [60, 64, 67, 72].forEach((n, i) => TIMBRES[2](this.ctx, t + i * 0.12, midi(n), 0.2, this.master));
+  }
+}
+
+// ---- App state ----------------------------------------------------------------
+let role = null, joined = false, myId = null, myTimbre = 0;
+let room = { w: 10, h: 8 }, world = null, engine = null;
+let me = { x: 5, y: 4 }, heading = 0, lastSend = 0;
+let view = null;
+let compass = null, headingOffset = 0, steps = 0, sensorsOn = false;
+let pending = { x: 0, y: 0 }, gEst = 9.81, smA = 0, prevA = 0, lastStepT = 0;
+const keys = new Set();
+const pad = { dx: 0, dy: 0 };
+
+const getPose = () => ({
+  x: me.x, y: me.y, heading,
+  speed: world && world.seeker ? world.seeker.speed : 0,
+});
+
+async function join(r) {
+  role = r;
+  if (r === 'seeker') {
+    engine = new Engine();      // must be created inside the click so the browser allows audio
+    engine.start();
+    try { await navigator.wakeLock.request('screen'); } catch (e) { /* optional */ }
+  }
+  socket.emit('join', { role: r });
+}
+
+socket.on('join_error', d => { alert(d.message); location.reload(); });
+
+socket.on('joined', d => {
+  joined = true; room = d.room; myId = d.id; myTimbre = d.timbre || 0;
+  if (d.x !== undefined) me = { x: d.x, y: d.y };
+  $('roles').hidden = true; $('play').hidden = false;
+  $('title').textContent = role === 'seeker' ? 'Seeker Instrument'
+    : role === 'hider' ? `Hider ${myId}: ${NAMES[myTimbre]}` : 'Spectator';
+  $('map').hidden = role === 'seeker';          // seeker is blindfolded: no map needed
+  $('sensors').hidden = role !== 'seeker';
+  $('pad').hidden = role === 'spectator';
+  $('runRow').hidden = role !== 'seeker';
+  $('resetBtn').hidden = role !== 'spectator';
+});
+
+socket.on('state', s => {
+  world = s; room = s.room;
+  const found = s.hiders.filter(h => h.found).length;
+  if (role === 'seeker') $('status').textContent = `Hiders found: ${found} / ${s.hiders.length}`;
+  else if (role === 'hider') $('status').textContent = 'Tap the map where you are hiding (buttons also work).';
+  else if (role === 'spectator') $('status').textContent =
+    `Seeker speed: ${s.seeker ? s.seeker.speed.toFixed(2) : '-'} m/s · found ${found} / ${s.hiders.length}`;
+});
+
+socket.on('found', () => { if (engine) engine.celebrate(); });
+
+// ---- Walking sensors: step counting (accelerometer) + heading (compass) ----------
+async function enableSensors() {
+  try {
+    if (typeof DeviceMotionEvent !== 'undefined' && DeviceMotionEvent.requestPermission) {
+      const [m, o] = await Promise.all([DeviceMotionEvent.requestPermission(),
+                                        DeviceOrientationEvent.requestPermission()]);
+      if (m !== 'granted' || o !== 'granted') {
+        $('sensorInfo').textContent = 'Permission denied. iPhone: Settings > Safari > Motion & Orientation Access.';
+        return;
+      }
+    }
+  } catch (e) { $('sensorInfo').textContent = 'Sensor error: ' + e.message; return; }
+  window.addEventListener('devicemotion', onMotion);
+  window.addEventListener('deviceorientationabsolute', onOrient, true);
+  window.addEventListener('deviceorientation', onOrient, true);
+  sensorsOn = true;
+  $('sensorBtn').textContent = 'Sensors on';
+}
+
+function onOrient(e) {
+  if (typeof e.webkitCompassHeading === 'number') compass = e.webkitCompassHeading;   // iOS
+  else if ((e.absolute || e.type === 'deviceorientationabsolute') && e.alpha != null) compass = 360 - e.alpha;  // Android
+}
+
+function onMotion(e) {
+  const a = e.accelerationIncludingGravity;
+  if (!a || a.x == null) return;
+  const m = Math.hypot(a.x, a.y, a.z);
+  gEst += (m - gEst) * 0.02;                 // slow baseline = gravity
+  smA += ((m - gEst) - smA) * 0.4;           // light smoothing
+  const now = performance.now();
+  if (prevA < STEP_THRESH && smA >= STEP_THRESH && now - lastStepT > STEP_MIN_MS) {
+    lastStepT = now; steps++;
+    const h = compass !== null ? (compass - headingOffset) * Math.PI / 180 : heading;
+    pending.x += STEP_LEN * Math.sin(h); pending.y += STEP_LEN * Math.cos(h);
+  }
+  prevA = smA;
+}
+
+function calibrate() {            // current facing direction becomes "north" (top wall) of the room map
+  if (compass !== null) headingOffset = compass;
+  me = { x: room.w / 2, y: room.h / 2 };
+  pending = { x: 0, y: 0 }; steps = 0; heading = 0;
+}
+
+// ---- Input -----------------------------------------------------------------
+window.addEventListener('keydown', e => {
+  const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  if (k.startsWith('Arrow')) e.preventDefault();
+  keys.add(k);
+});
+window.addEventListener('keyup', e => keys.delete(e.key.length === 1 ? e.key.toLowerCase() : e.key));
+document.querySelectorAll('#pad .nav').forEach(b => {
+  const press = e => { e.preventDefault(); pad.dx = +b.dataset.dx; pad.dy = +b.dataset.dy; };
+  const release = () => { pad.dx = 0; pad.dy = 0; };
+  b.addEventListener('pointerdown', press);
+  ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => b.addEventListener(ev, release));
+});
+
+$('map').addEventListener('pointerdown', e => {
+  if (role !== 'hider' || !view) return;
+  const c = $('map'), r = c.getBoundingClientRect();
+  const px = (e.clientX - r.left) * (c.width / r.width), py = (e.clientY - r.top) * (c.height / r.height);
+  me.x = clamp((px - view.ox) / view.s, 0, room.w);
+  me.y = clamp(room.h - (py - view.oy) / view.s, 0, room.h);
+  socket.emit('move', { x: me.x, y: me.y });
+});
+
+// ---- Main loop: move, send position, draw map --------------------------------
+let last = performance.now();
+function loop(now) {
+  const dt = Math.min(0.1, (now - last) / 1000); last = now;
+  if (joined && (role === 'seeker' || role === 'hider')) {
+    if (role === 'seeker' && sensorsOn) {
+      if (compass !== null) heading = (compass - headingOffset) * Math.PI / 180;
+      const pl = Math.hypot(pending.x, pending.y);
+      if (pl > 0) {                                   // glide each step over ~0.5 s so speed is smooth
+        const mv = Math.min(pl, (STEP_LEN / 0.5) * dt), ux = pending.x / pl, uy = pending.y / pl;
+        me.x = clamp(me.x + ux * mv, -0.5, room.w + 0.5); me.y = clamp(me.y + uy * mv, -0.5, room.h + 0.5);
+        pending.x -= ux * mv; pending.y -= uy * mv;
+      }
+      $('sensorInfo').textContent = `steps ${steps} · compass ${compass === null ? 'n/a' : Math.round(compass)}° · x ${me.x.toFixed(1)} y ${me.y.toFixed(1)}`;
+    }
+    let dx = pad.dx, dy = pad.dy;
+    if (keys.has('ArrowLeft') || keys.has('a')) dx -= 1;
+    if (keys.has('ArrowRight') || keys.has('d')) dx += 1;
+    if (keys.has('ArrowUp') || keys.has('w')) dy += 1;
+    if (keys.has('ArrowDown') || keys.has('s')) dy -= 1;
+    const mag = Math.hypot(dx, dy);
+    if (mag > 0) {
+      const v = role === 'seeker' ? ($('run').checked ? RUN : WALK) : HIDER_SPEED;
+      dx /= mag; dy /= mag;
+      me.x = clamp(me.x + dx * v * dt, -0.5, room.w + 0.5);
+      me.y = clamp(me.y + dy * v * dt, -0.5, room.h + 0.5);
+      if (role === 'seeker' && !sensorsOn) heading = Math.atan2(dx, dy);   // 0 = facing north (+y)
+    }
+    // Seeker sends a 10 Hz heartbeat even when standing still so speed decays to 0
+    if (now - lastSend > 100 && (role === 'seeker' || mag > 0)) {
+      socket.emit('move', { x: me.x, y: me.y }); lastSend = now;
+    }
+  }
+  draw();
+  requestAnimationFrame(loop);
+}
+
+function draw() {
+  const c = $('map');
+  if (c.hidden || !world) return;
+  const g = c.getContext('2d');
+  const s = Math.min(c.width / (room.w + 1), c.height / (room.h + 1));
+  const ox = (c.width - room.w * s) / 2, oy = (c.height - room.h * s) / 2;
+  view = { s, ox, oy };
+  const X = x => ox + x * s, Y = y => oy + (room.h - y) * s;
+  g.clearRect(0, 0, c.width, c.height);
+  g.strokeStyle = '#2c3e50'; g.lineWidth = 2;
+  g.strokeRect(X(0), Y(room.h), room.w * s, room.h * s);
+  g.fillStyle = '#7f8c8d'; g.font = '11px Arial'; g.fillText('top wall (north)', X(0) + 4, Y(room.h) - 4);
+  for (const h of world.hiders) {
+    g.globalAlpha = h.found ? 0.3 : 1;
+    g.fillStyle = COLORS[h.timbre];
+    g.beginPath(); g.arc(X(h.x), Y(h.y), 9, 0, 7); g.fill();
+    g.fillStyle = '#2c3e50'; g.font = '11px Arial'; g.fillText(NAMES[h.timbre], X(h.x) - 14, Y(h.y) - 13);
+  }
+  g.globalAlpha = 1;
+  if (world.seeker) {
+    g.fillStyle = '#2980b9';
+    g.beginPath(); g.arc(X(world.seeker.x), Y(world.seeker.y), 8, 0, 7); g.fill();
+  }
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
