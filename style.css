@@ -1,0 +1,45 @@
+:root {
+  --bg: #0e1015; --panel: #171a22; --panel2: #1f232d; --line: #2a2f3b;
+  --text: #f1f3f7; --muted: #98a0b3;
+  --ok: #3ddc84; --accent: #ff7a3d;   /* --ok is only used on the laptop screen */
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; background: var(--bg); color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+body { min-height: 100vh; padding: max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom)); }
+main { max-width: 640px; margin: 0 auto; }
+h1 { font-size: 1.7rem; margin: 8px 0 4px; letter-spacing: -0.01em; }
+h2 { font-size: 1.05rem; margin: 0 0 10px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px; margin: 12px 0; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.row > * { flex: 1 1 auto; }
+.stack > * + * { margin-top: 10px; }
+.stack > button { display: block; width: 100%; }
+
+button {
+  font: inherit; font-weight: 600; color: var(--text); background: var(--panel2);
+  border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; cursor: pointer; min-height: 48px;
+  touch-action: manipulation; user-select: none; -webkit-user-select: none;
+}
+button:hover { border-color: #444b5c; }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #1a0d05; }
+button.good { background: var(--ok); border-color: var(--ok); color: #05210f; }
+button.on { border-color: var(--ok); color: var(--ok); }   /* laptop "Play audio here: ON" */
+@media (prefers-reduced-motion: no-preference) { button { transition: background .15s, border-color .15s; } }
+
+input[type=text], input[type=number] {
+  font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line);
+  border-radius: 10px; padding: 12px; width: 100%; min-height: 48px;
+}
+label { color: var(--muted); font-size: 0.9rem; display: block; margin-bottom: 6px; }
+
+.code { font-size: 2.6rem; font-weight: 800; letter-spacing: 0.18em; font-variant-numeric: tabular-nums; }
+.big { font-size: 3.4rem; font-weight: 800; line-height: 1; margin: 4px 0; }
+.mono { font-variant-numeric: tabular-nums; }
+canvas { display: block; width: 100%; background: #14171d; border-radius: 12px; touch-action: none; margin: 0 auto; }
+
+/* join error message on the seeker / hider screens (no colour, by design) */
+.banner { padding: 12px 14px; border-radius: 12px; font-weight: 600; margin-top: 10px;
+  background: var(--panel2); border: 1px solid var(--line); color: var(--text); }
