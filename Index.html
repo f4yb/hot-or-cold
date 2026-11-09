@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>MMR</title>
+<link rel="stylesheet" href="style.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+<script src="script.js" defer></script>
+</head>
+<body>
+<main>
+
+  <!-- HOME -->
+  <section id="home">
+    <h1>MUSI3071</h1>
+    <div class="card stack">
+      <button class="primary" id="go-tracker">Laptop</button>
+      <button id="go-seeker">Seeker</button>
+      <button id="go-hider">Hider</button>
+    </div>
+  </section>
+
+  <!-- TRACKER -->
+  <section id="tracker" hidden>
+    <div class="row" style="justify-content:space-between">
+      <h1 style="margin:0">Tracker</h1>
+      <button id="t-back" style="flex:0 0 auto">Back</button>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <div class="code" id="t-code">----</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Round</h2>
+      <div class="row">
+        <button class="good" id="t-start">Start round</button>
+        <button id="t-stop">Pause</button>
+        <button id="t-found">Mark found</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Distance input</h2>
+      <div id="panel-map">
+        <canvas id="map"></canvas>
+        <div class="row" style="margin-top:12px">
+          <div><label for="t-roomw">Play area width (m)</label><input type="number" id="t-roomw" min="2" max="30" step="0.5" value="6" inputmode="decimal" /></div>
+          <div><label for="t-roomh">Play area depth (m)</label><input type="number" id="t-roomh" min="2" max="30" step="0.5" value="6" inputmode="decimal" /></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="big mono"><span id="t-d">0.0</span> m</div>
+    </div>
+
+    <div class="card">
+      <button id="t-monitor">Play audio here: off</button>
+    </div>
+  </section>
+
+  <!-- SEEKER -->
+  <section id="seeker" hidden>
+    <div class="row" style="justify-content:space-between">
+      <h1 style="margin:0">Seeker</h1>
+      <button id="s-back" style="flex:0 0 auto">Back</button>
+    </div>
+
+    <div class="card" id="s-join">
+      <input type="text" id="s-code" maxlength="4" autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="Enter Code" />
+      <div class="row" style="margin-top:12px">
+        <button class="primary" id="s-joinbtn">Join</button>
+      </div>
+      <div class="banner" id="s-joinerr" hidden></div>
+    </div>
+
+    <div id="s-live" hidden>
+      <div class="card">
+        <div class="big mono"><span id="s-d">-</span> m</div>
+      </div>
+
+      <div class="card">
+        <h2>Walking sensors</h2>
+        <div class="stack">
+          <button class="primary" id="s-sensors">1. Enable walking sensors</button>
+          <button id="s-calib">2. Stand at the start spot facing the top wall, then tap</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- HIDER -->
+  <section id="hider" hidden>
+    <div class="row" style="justify-content:space-between">
+      <h1 style="margin:0">Hider</h1>
+      <button id="h-back" style="flex:0 0 auto">Back</button>
+    </div>
+
+    <div class="card" id="h-join">
+      <input type="text" id="h-code" maxlength="4" autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="Enter Code" />
+      <div class="row" style="margin-top:12px">
+        <button class="primary" id="h-joinbtn">Join</button>
+      </div>
+      <div class="banner" id="h-joinerr" hidden></div>
+    </div>
+
+    <div id="h-live" hidden>
+      <div class="card">
+        <canvas id="h-map"></canvas>
+      </div>
+    </div>
+  </section>
+
+</main>
+</body>
+</html>
