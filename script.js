@@ -59,15 +59,25 @@ function connectServer(onConnect) {
 }
 
 /* =====================================================================
-   AUDIO: a generative backing track that never stops.
-   Chord loop: Am - F - C - G (4 bars). Distance decides which LAYERS are in:
-     far   : pad only (dark, muffled, lots of reverb)
-     COLD  : + heartbeat kick, sparse arpeggio
-     COOL  : + bass line, off-beat hi-hats
-     WARM  : + clap, chord plucks, kick gets busier
-     HOT   : + melody, strings
-     FOUND : the full symphony (timpani roll, harmony line, sparkle, crash, fast tempo)
-   Closer also means: brighter (filter opens), drier (less reverb), faster (tempo rises).
+   AUDIO: a generative score that never stops. Each design choice traces back to
+   the team's music research and user testing (see the "how it works" doc):
+     TARGET BEACON  always on during a round, in the 1-4 kHz band the ear hears best
+                    (testers struggled with low notes). Its pitch RISES and its pulse
+                    SPEEDS UP as the seeker closes in, and it is PANNED left/right to the
+                    hider's direction and darker when the hider is behind (Papa Sangre).
+     WRONG WAY      walking away from the hider adds a semitone clash to the beacon:
+                    dissonance as negative feedback, consonance when back on course.
+     FOOTSTEPS      every step plays a chord tone, higher the closer you are
+                    ("more music with every step"; the walker composes the music).
+     BACKING TRACK  chord loop Am - F - C - G. Distance decides which LAYERS are in:
+                      far   : pad only (dark, muffled, lots of reverb)
+                      COLD  : + heartbeat kick, sparse arpeggio
+                      COOL  : + bass line, off-beat hi-hats
+                      WARM  : + clap, chord plucks, kick gets busier
+                      HOT   : + melody, strings
+                      FOUND : the full symphony (timpani, harmony, sparkle, crash)
+                    Closer also means brighter, drier (less reverb) and faster.
+     BOUNDARY       a dissonant mid-register cluster pulses when out of bounds.
    ===================================================================== */
 const sstep = (x) => { x = x < 0 ? 0 : x > 1 ? 1 : x; return x * x * (3 - 2 * x); };
 const band = (d, full, off) => sstep((off - d) / (off - full));   // 1 when d <= full, 0 when d >= off
@@ -81,7 +91,8 @@ const LAYERS = {
   clap:    (d) => band(d, 1.2, 2.2),
   stab:    (d) => band(d, 1.0, 2.0),
   lead:    (d) => band(d, 0.6, 1.3),
-  strings: (d) => band(d, 0.4, 1.0)
+  strings: (d) => band(d, 0.4, 1.0),
+  beacon:  (d) => 0.6 + 0.4 * band(d, 0.5, 6)      // always on while searching, louder when close
 };
 const FOUND_GAINS = { pad: 1, heart: 1, arp: 1, bass: 1, hats: 1, clap: 1, stab: 1, lead: 1, strings: 1, timpani: 1, harmony: 1, sparkle: 1, crash: 1 };
 
@@ -100,6 +111,10 @@ const MELODY = [
 const BASS_PATTERN = { 0: 0, 6: 0, 8: 0, 11: 1, 14: 0 };
 const STAB_STEPS = [3, 6, 10, 14];
 const PENTA = ["C6", "D6", "E6", "G6", "A6", "C7"];
+const BEACON_SCALE = ["C5", "D5", "E5", "G5", "A5", "C6", "D6", "E6"];   // far -> near: pitch rises as you close in
+const beaconEvery = (d) => d > 4 ? 8 : d > 2.5 ? 4 : d > 1 ? 2 : 1;   // 16th notes between pings: faster when closer
+const BOUNDARY_CLUSTER = ["C4", "C#4", "F#4"];                           // minor 2nd + tritone: deliberately uncomfortable
+const prox = (d) => 1 - Math.min(Math.max(d, 0), 6) / 6;                 // 0 far (6 m+) .. 1 on top of the hider
 
 const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 const THIRD = { 0: 4, 2: 3, 4: 3, 5: 4, 7: 4, 9: 3, 11: 3 };
@@ -112,6 +127,7 @@ function thirdAbove(n) {
 
 const Score = {
   ready: false, cur: null, dS: null, wasFound: false, lastFire: 0, tickCount: 0, lastBpm: 0, inst: {},
+  lastD: null, trend: 0, wrongWay: false, stepCount: 0,
 
   async init() {
     if (this.ready) return;
@@ -130,7 +146,7 @@ const Score = {
     const I = this.inst;
     I.pad = new Tone.PolySynth(Tone.Synth, { oscillator: { type: "fatsawtooth", count: 3, spread: 25 }, envelope: { attack: 1.0, decay: 0.4, sustain: 0.8, release: 2.0 } });
     via(I.pad, "lowpass", 2200); I.pad.volume.value = -17;
-    I.heart = new Tone.MembraneSynth({ pitchDecay: 0.04, octaves: 5, envelope: { attack: 0.001, decay: 0.35, sustain: 0, release: 0.1 } });
+    I.heart = new Tone.MembraneSynth({ pitchDecay: 0.04, octaves: 5, envelope: { attack: 0.001, decay: 0.35, sustain: 0, release: 0.1 } });   // A1 + a bright click: audible on headphones
     I.heart.connect(this.mix); I.heart.volume.value = -7;
     I.arp = new Tone.PolySynth(Tone.Synth, { oscillator: { type: "triangle" }, envelope: { attack: 0.005, decay: 0.25, sustain: 0, release: 0.3 } });
     I.arp.connect(this.mix); I.arp.volume.value = -13;
@@ -154,8 +170,19 @@ const Score = {
     I.sparkle.connect(this.mix); I.sparkle.volume.value = -19;
     I.crash = new Tone.NoiseSynth({ noise: { type: "white" }, envelope: { attack: 0.001, decay: 1.6, sustain: 0 } });
     via(I.crash, "highpass", 3000); I.crash.volume.value = -14;
-    I.buzzer = new Tone.Synth({ oscillator: { type: "sawtooth" }, envelope: { attack: 0.01, decay: 0.15, sustain: 0.2, release: 0.1 } });
-    I.buzzer.connect(this.comp); I.buzzer.volume.value = -12;      // bypasses the muffling filter so it always cuts through
+    I.buzzer = new Tone.PolySynth(Tone.Synth, { oscillator: { type: "sawtooth" }, envelope: { attack: 0.01, decay: 0.15, sustain: 0.2, release: 0.1 } });
+    I.buzzer.connect(this.comp); I.buzzer.volume.value = -16;      // bypasses the muffling filter so it always cuts through
+
+    // Target beacon: its own dry-ish path (skips the muffling filter so it stays audible far away),
+    // panned to the hider's side and darker when the hider is behind the seeker.
+    this.beaconPan = new Tone.Panner(0).connect(this.verb);
+    this.beaconTone = new Tone.Filter(6000, "lowpass").connect(this.beaconPan);
+    I.beacon = new Tone.PolySynth(Tone.Synth, { oscillator: { type: "triangle" }, envelope: { attack: 0.002, decay: 0.18, sustain: 0, release: 0.15 } });
+    I.beacon.connect(this.beaconTone); I.beacon.volume.value = -10;
+
+    // Footstep notes: dry and immediate, so each step is clearly "yours".
+    I.step = new Tone.PolySynth(Tone.Synth, { oscillator: { type: "triangle" }, envelope: { attack: 0.003, decay: 0.14, sustain: 0, release: 0.1 } });
+    I.step.connect(this.comp); I.step.volume.value = -14;
 
     Tone.Transport.bpm.value = 84; this.lastBpm = 84;
     Tone.Transport.scheduleRepeat((t) => this.tick(t), "16n");
@@ -184,7 +211,7 @@ const Score = {
 
     if (st === 0 && g("pad") > 0.02) I.pad.triggerAttackRelease(ch.pad, "1m", time, 0.25 + 0.5 * g("pad"));
     if (g("heart") > 0.03 && (st === 0 || st === 8 || ((st === 4 || st === 12) && g("clap") > 0.3)))
-      I.heart.triggerAttackRelease("E1", "8n", time, v("heart", 0.8));
+      I.heart.triggerAttackRelease("A1", "8n", time, v("heart", 0.8));
     if (g("arp") > 0.03 && st % 2 === 0 && (g("arp") > 0.5 || st % 4 === 0))
       I.arp.triggerAttackRelease(ch.tones[[0, 1, 2, 3, 2, 1, 2, 3][(st / 2) % 8]], "16n", time, v("arp", 0.55));
     if (g("bass") > 0.03 && st in BASS_PATTERN)
@@ -197,9 +224,15 @@ const Score = {
     if (mel && g("lead") > 0.03) I.lead.triggerAttackRelease(mel, "8n", time, v("lead", 0.8));
     if (st === 0 && g("strings") > 0.03) I.strings.triggerAttackRelease(ch.str, "1m", time, v("strings", 0.6));
 
+    if (g("beacon") > 0 && st % beaconEvery(this.dS) === 0) {   // target beacon
+      const note = BEACON_SCALE.at(Math.round(prox(this.dS) * (BEACON_SCALE.length - 1)));
+      const notes = this.wrongWay ? [note, Tone.Frequency(note).transpose(1).toNote()] : note;   // clash = wrong way
+      I.beacon.triggerAttackRelease(notes, "32n", time, Math.min(1, 0.85 * g("beacon")));
+    }
+
     if (found) {   // the symphony extras
-      if (st === 0 || st === 8) I.timpani.triggerAttackRelease(ch.bass[0], "8n", time, 0.9);
-      if (bar === 3 && st >= 8) I.timpani.triggerAttackRelease(ch.bass[0], "16n", time, 0.25 + 0.75 * ((st - 8) / 7));
+      if (bar === 3 && st >= 8) I.timpani.triggerAttackRelease(ch.bass[0], "16n", time, 0.25 + 0.75 * ((st - 8) / 7));   // roll into the loop
+      else if (st === 0 || st === 8) I.timpani.triggerAttackRelease(ch.bass[0], "8n", time, 0.9);
       if (mel) I.harmony.triggerAttackRelease(thirdAbove(mel), "8n", time, 0.6);
       if (st % 2 === 1) I.sparkle.triggerAttackRelease(PENTA[(n * 3) % PENTA.length], "32n", time, 0.35);
       if (st === 0 && bar === 0) I.crash.triggerAttackRelease("2n", time, 0.9);
@@ -210,7 +243,7 @@ const Score = {
     const s = this.cur;
     if (!this.ready || !s || !s.live || !s.running || s.found || s.inBounds) return;
     const now = performance.now();
-    if (now - this.lastFire >= 700) { this.lastFire = now; try { this.inst.buzzer.triggerAttackRelease("A2", "8n"); } catch (e) {} }
+    if (now - this.lastFire >= 700) { this.lastFire = now; try { this.inst.buzzer.triggerAttackRelease(BOUNDARY_CLUSTER, "8n"); } catch (e) {} }
   },
 
   finale() {
@@ -220,31 +253,57 @@ const Score = {
     I.strings.triggerAttackRelease(["C4", "E4", "G4", "C5", "E5"], "1m", t, 0.9);
   },
 
+  step() {   // footstep note: a chord tone of the current bar, up to two octaves higher when close
+    const s = this.cur;
+    if (!this.ready || !s || !s.live || !s.running || s.found || !s.inBounds) return;
+    const tone = CHORDS[Math.floor(this.tickCount / 16) % 4].tones[this.stepCount++ % 4];
+    this.inst.step.triggerAttackRelease(Tone.Frequency(tone).transpose(12 * Math.round(prox(this.dS) * 2)).toNote(), "16n", Tone.now() + 0.01, 0.8);
+  },
+
   testTones() {
     const t = Tone.now();
     ["C4", "E4", "G4", "C5"].forEach((nn, i) => this.inst.arp.triggerAttackRelease(nn, "8n", t + i * 0.25, 0.8));
   },
 
-  // s = { live, running, inBounds, found, d } or null to go silent
+  // s = { live, running, inBounds, found, d, rel } or null to go silent.
+  // rel = where the hider is relative to the way the seeker faces: { pan: -1 left .. 1 right, front: -1 behind .. 1 ahead }
   update(s) {
     this.cur = s;
-    if (!s) { this.dS = null; this.wasFound = false; return; }
+    if (!s) { this.dS = null; this.wasFound = false; this.lastD = null; this.wrongWay = false; return; }
     this.dS = this.dS == null ? s.d : this.dS + CONFIG.smoothing * (s.d - this.dS);
+
+    // Wrong way: distance trending upwards while searching (about 0.2 m/s away from the hider).
+    if (this.lastD != null && s.running && s.inBounds && !s.found) {
+      this.trend = 0.8 * this.trend + 0.2 * (s.d - this.lastD);
+      if (this.trend > 0.02) this.wrongWay = true;
+      else if (this.trend < 0.005) this.wrongWay = false;
+    } else { this.trend = 0; this.wrongWay = false; }
+    this.lastD = s.d;
+
     if (!this.ready) { this.wasFound = !!s.found; return; }
-    const prox = s.found ? 1 : 1 - Math.min(Math.max(this.dS, 0), 6) / 6;     // 0 far .. 1 on top of the hider
+    if (s.rel) {   // beacon direction: panned to the hider's side, muffled when the hider is behind
+      this.beaconPan.pan.rampTo(s.found ? 0 : 0.85 * s.rel.pan, 0.1);
+      this.beaconTone.frequency.rampTo(1800 + 4200 * (s.rel.front + 1) / 2, 0.15);
+    }
+    const p = s.found ? 1 : prox(this.dS);
     const open = (s.running && s.inBounds) || s.found;
-    this.filt.frequency.rampTo(s.found ? 14000 : open ? 700 * Math.pow(16, prox) : 500, 0.4);   // muffled far, bright close
-    this.verb.wet.rampTo(s.found ? 0.18 : 0.45 - 0.3 * prox, 0.4);                              // distant = wet, close = dry
+    this.filt.frequency.rampTo(s.found ? 14000 : open ? 700 * Math.pow(16, p) : 500, 0.4);   // muffled far, bright close
+    this.verb.wet.rampTo(s.found ? 0.18 : 0.45 - 0.3 * p, 0.4);                              // distant = wet, close = dry
     this.mix.gain.rampTo(!s.live ? 0 : (s.running && !s.inBounds && !s.found) ? 0.35 : 0.8, 0.3);
-    const bpm = s.found ? 118 : 84 + 26 * prox;                                                  // tempo climbs as you close in
+    const bpm = s.found ? 118 : 84 + 26 * p;                                                  // tempo climbs as you close in
     if (Math.abs(bpm - this.lastBpm) > 1) { this.lastBpm = bpm; Tone.Transport.bpm.rampTo(bpm, 1.5); }
     if (s.found && !this.wasFound && s.live) this.finale();
     this.wasFound = !!s.found;
   }
 };
 
-// Turns a server state message into what the Score needs.
-const scoreInput = (st, live) => ({ live, running: st.running && st.trk !== false, inBounds: st.inBounds, found: st.found, d: st.d });
+// Turns a server state message into what the Score needs. pose = the seeker's {x, y, heading}
+// (the seeker phone passes its own, fresher one; the laptop uses the one in the state).
+const relTo = (pose, h) => { const a = Math.atan2(h.x - pose.x, h.y - pose.y) - pose.heading; return { pan: Math.sin(a), front: Math.cos(a) }; };
+const scoreInput = (st, live, pose) => {
+  const p = pose || st.seeker;
+  return { live, running: st.running && st.trk !== false, inBounds: st.inBounds, found: st.found, d: st.d, rel: p && st.hider ? relTo(p, st.hider) : null };
+};
 
 /* =====================================================================
    FLOOR MAP (shared by tracker and hider). World y points up.
@@ -417,7 +476,7 @@ const S = {
   me: { x: 3, y: 3 }, heading: 0, pending: { x: 0, y: 0 },
   sensorsOn: false, motionSeen: false, compass: null, headingOffset: 0,
   gEst: 9.81, smA: 0, prevA: 0, lastStepT: 0,
-  keys: new Set(), lastLoop: performance.now(), lastSend: 0
+  keys: new Set(), lastLoop: performance.now(), lastSend: 0, lastKeyStep: 0
 };
 
 async function enableSensors() {
@@ -458,6 +517,7 @@ function onMotion(e) {
     const h = S.compass !== null ? (S.compass - S.headingOffset) * Math.PI / 180 : S.heading;
     S.pending.x += CONFIG.stepLength * Math.sin(h);
     S.pending.y += CONFIG.stepLength * Math.cos(h);
+    Score.step();
   }
   S.prevA = S.smA;
 }
@@ -503,6 +563,7 @@ function seekerLoop() {
     S.me.x = clamp(S.me.x + dx / mag * v * dt, -mg, r.w + mg);
     S.me.y = clamp(S.me.y + dy / mag * v * dt, -mg, r.h + mg);
     if (!S.sensorsOn || S.compass === null) S.heading = Math.atan2(dx, dy);
+    if (now - S.lastKeyStep > 500) { S.lastKeyStep = now; Score.step(); }   // keyboard walking plays steps too
   }
   sendPos(false);       // 10 Hz heartbeat even when standing still, so the link stays live
 }
@@ -520,7 +581,7 @@ function seekerRender() {
 function seekerPush() {
   const st = S.state;
   if (!st) { Score.update(null); return; }
-  Score.update(scoreInput(st, seekerLive()));
+  Score.update(scoreInput(st, seekerLive(), { x: S.me.x, y: S.me.y, heading: S.heading }));
 }
 
 async function seekerJoin(code) {
