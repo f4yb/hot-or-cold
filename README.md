@@ -76,7 +76,18 @@ Other rules:
 
 ## Music engine
 
-All sound is made live in the seeker's browser with Tone.js, with no audio files. A backing track loops on Am – F – C – G and never stops; distance decides which instrument layers play and how loud.
+All sound is made live in the seeker's browser with Tone.js, with no audio files. Four parts play together during a round: a target beacon, footstep notes, a backing track that builds into a symphony, and a boundary warning.
+
+**Target beacon.** A short bell-like ping that plays the whole time the seeker is searching. It is pitched in the 1–4 kHz range, where hearing is most sensitive.
+
+- **Pitch rises with proximity:** it climbs a pentatonic scale from C5 (6 m or more away) to E6 (on top of the hider).
+- **Pulse speeds up:** one ping every 8 sixteenth-notes beyond 4 m, every 4 from 2.5 m, every 2 from 1 m, then every sixteenth-note.
+- **Direction:** the ping is panned towards the side the hider is on, relative to the way the seeker's phone faces, and sounds duller when the hider is behind them.
+- **Wrong way:** if the distance keeps growing (walking away at roughly 0.2 m/s or more), each ping gains a clashing note a semitone above. It turns consonant again once the seeker heads back.
+
+**Footstep notes.** Every detected step plays a note from the current chord, up to two octaves higher as the seeker closes in, so the walker's movement adds to the music.
+
+**Backing track.** A loop on Am – F – C – G that never stops; distance decides which layers join.
 
 | Layer | Starts fading in at | Full volume by |
 | --- | --- | --- |
@@ -89,20 +100,34 @@ All sound is made live in the seeker's browser with Tone.js, with no audio files
 | Melody | 1.3 m | 0.6 m |
 | Strings | 1.0 m | 0.4 m |
 
-Closer also changes the sound overall (measured over the last 6 m):
-
-- **Brighter:** a low-pass filter opens from about 700 Hz far away to about 11 kHz on top of the hider.
-- **Drier:** reverb drops from 45% to 15%.
-- **Faster:** tempo rises from 84 to 110 BPM.
+Closer also changes the backing track overall (measured over the last 6 m): a low-pass filter opens from about 700 Hz to about 11 kHz, reverb drops from 45% to 15%, and the tempo rises from 84 to 110 BPM.
 
 Special states:
 
 - **Waiting or not tracking:** only a quiet pad plays.
-- **Out of bounds:** the music ducks and a low buzzer (A2) sounds every 0.7 s until the seeker steps back in.
+- **Out of bounds:** the beacon stops, the music ducks, and a dissonant cluster (C4, C#4, F#4) pulses every 0.7 s until the seeker steps back in.
 - **Found:** a fanfare plays, then the full symphony: every layer plus timpani, a harmony line, sparkles and cymbal crashes at 118 BPM.
 - **Signal lost:** if the seeker's phone hears nothing from the server for 2.5 s, the music goes silent.
 
-The laptop's *Play audio here* button runs the same engine on the laptop as a backup.
+The laptop's *Play audio here* button runs the same engine on the laptop as a backup (without footstep notes).
+
+### Why the music works this way
+
+Each musical choice answers a finding from the team's research or user testing.
+
+| Finding | Source | How the music responds |
+| --- | --- | --- |
+| Rising pitch reads as "getting warmer"; the core mechanic maps distance to pitch height | Music research; idea development | Beacon pitch climbs a scale as distance shrinks |
+| Constant rhythm made navigation easier | Craig, test 1 | Beacon pulses from the first second of a round, faster when closer |
+| Low notes such as C2 were hard to hear; the ear is most sensitive at 1–4 kHz | Workshop tests 29/10; music research | Beacon sits at C5–E6 and skips the muffling filter; heartbeat kick raised from E1 to A1 |
+| Pitch felt too linear; explore panning and timbre | Juan | Beacon is panned to the hider's side and dulled when the hider is behind |
+| Distant targets sound wet and muffled, close ones dry and sharp; drones plus a separate target beacon | Papa Sangre | Backing track is muffled and reverberant far away, bright and dry close up; beacon is a distinct layer over it |
+| Dissonance works as negative feedback, consonance as "on the right path" | Music research | Semitone clash when walking away; dissonant cluster at the boundary |
+| Needed a distinct cue at the boundary edges | Shanay | Out-of-bounds cluster replaces the beacon |
+| Wanted "more music with every step"; movement feedback from footsteps | Craig, test 1; Papa Sangre | Every step plays a chord tone, higher when closer |
+| Movement should compose the music rather than a pre-written score | Idea development | Steps, beacon pitch and layers all come from the seeker's movement |
+| Not musical enough; needs a musical journey | Xuan, workshop 29/10 | Layers build from a lone pad to a full symphony |
+| Add a special reward sound when the hider is found | Juan | Fanfare plus the full symphony |
 
 ## Running a session
 
