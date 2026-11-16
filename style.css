@@ -43,3 +43,11 @@ canvas { display: block; width: 100%; background: #14171d; border-radius: 12px; 
 /* join error message on the seeker / hider screens (no colour, by design) */
 .banner { padding: 12px 14px; border-radius: 12px; font-weight: 600; margin-top: 10px;
   background: var(--panel2); border: 1px solid var(--line); color: var(--text); }
+/* V5: mode buttons, status lines, scavenger hunt */
+.muted { color: var(--muted); }
+.hint { color: var(--muted); font-size: 0.9rem; margin: 10px 0 0; }
+.status { margin: 12px 0 0; font-weight: 600; color: var(--muted); }
+.status.live { color: var(--text); }
+.status.win { color: var(--ok); }
+.progress { font-size: 1.3rem; font-weight: 700; margin-top: 8px; color: var(--muted); }
+h2 .muted { font-weight: 600; margin-left: 6px; }
