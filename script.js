@@ -1,11 +1,13 @@
 "use strict";
 /* =====================================================================
-   HOT OR COLD ENGINE V4
+   HOT OR COLD ENGINE V5  (modes: hot or cold, scavenger hunt)
      seeker phone  -> step counter + compass -> its own (x, y) -> server
      hider phone   -> tap on the map         -> (x, y)           -> server
      tracker       -> watches the map, drags dots to correct drift
      server (app.py) works out distance / bounds / found and sends
-     { running, found, inBounds, d, trk, seeker:{x,y,heading,live}, hider:{x,y}, room:{w,h} } at 10 Hz.
+     { mode, order, running, found, inBounds, d, trk, seeker:{x,y,heading,live}, hider:{x,y},
+       active, target:{x,y}, targets:[{x,y,found}], foundCount, total, room:{w,h} } at 10 Hz.
+   "target" is wherever the music points: the hider (hot or cold) or the active hunt target.
    World coordinates are metres, (0,0) is the bottom-left corner,
    +y points at the top wall ("north"), heading 0 = facing the top wall.
    Everything tweakable lives in CONFIG and ZONES.
@@ -21,15 +23,16 @@ const CONFIG = {
   stepThresh: 1.2,         // m/s^2 above gravity that counts as a step peak
   stepMinMs: 350,          // ignore peaks closer together than this
   stepGlideS: 0.5,         // spread each step's movement over this long, so distance moves smoothly
-  keyboardSpeed: 1.2       // m/s when testing the seeker on a laptop with the arrow keys / WASD
+  keyboardSpeed: 1.2,      // m/s when testing the seeker on a laptop with the arrow keys / WASD
+  maxTargets: 12           // scavenger hunt (must match MAX_TARGETS in app.py)
 };
 
 // Zone rings drawn on the map around the hider (hot, warm, cool, cold). "max" = ring radius in metres.
 const ZONES = [
-  { max: 1, color: "#ff4a2b" },
-  { max: 2, color: "#ffa31a" },
-  { max: 3, color: "#4fc3b0" },
-  { max: 4, color: "#3d8bff" }
+  { max: 0.5, color: "#ff4a2b" },
+  { max: 1, color: "#ffa31a" },
+  { max: 1.5, color: "#4fc3b0" },
+  { max: 2, color: "#3d8bff" }
 ];
 
 const $ = (s) => document.querySelector(s);
@@ -94,6 +97,10 @@ const LAYERS = {
   strings: (d) => band(d, 0.4, 1.0),
   beacon:  (d) => 0.6 + 0.4 * band(d, 0.5, 6)      // always on while searching, louder when close
 };
+// Scavenger hunt: every target collected unlocks the next layer for good (at a low level), so the
+// music grows across the whole hunt, while distance still decides everything above that floor.
+const HUNT_UNLOCK = ["heart", "arp", "bass", "hats", "clap", "stab"];
+const HUNT_FLOOR = 0.45;
 const FOUND_GAINS = { pad: 1, heart: 1, arp: 1, bass: 1, hats: 1, clap: 1, stab: 1, lead: 1, strings: 1, timpani: 1, harmony: 1, sparkle: 1, crash: 1 };
 
 const CHORDS = [
@@ -127,7 +134,7 @@ function thirdAbove(n) {
 
 const Score = {
   ready: false, cur: null, dS: null, wasFound: false, lastFire: 0, tickCount: 0, lastBpm: 0, inst: {},
-  lastD: null, trend: 0, wrongWay: false, stepCount: 0,
+  lastD: null, trend: 0, wrongWay: false, stepCount: 0, lastTarget: undefined, lastCount: null,
 
   async init() {
     if (this.ready) return;
@@ -197,6 +204,10 @@ const Score = {
     if (!s.running) return { pad: 0.35 };
     if (!s.inBounds) return { pad: 0.3 };
     const g = {}; for (const k in LAYERS) g[k] = LAYERS[k](d);
+    if (s.hunt && s.total > 0) {
+      const n = Math.round(s.foundCount / s.total * HUNT_UNLOCK.length);
+      for (let i = 0; i < n; i++) g[HUNT_UNLOCK[i]] = Math.max(g[HUNT_UNLOCK[i]], HUNT_FLOOR);
+    }
     return g;
   },
 
@@ -253,6 +264,14 @@ const Score = {
     I.strings.triggerAttackRelease(["C4", "E4", "G4", "C5", "E5"], "1m", t, 0.9);
   },
 
+  collect(k) {   // scavenger hunt: one target collected (not the last one, that gets finale())
+    const t = Tone.now() + 0.02, I = this.inst;   // I.step skips the muffling filter, so this is always bright
+    ["A4", "C5", "E5", "A5", "C6"].forEach((nn, i) => I.step.triggerAttackRelease(nn, "16n", t + i * 0.07, 0.9));
+    I.timpani.triggerAttackRelease("A2", "8n", t, 0.8);
+    for (let i = 0; i < Math.min(k, 12); i++)       // one bell per target found so far: count them by ear
+      I.step.triggerAttackRelease("E6", "32n", t + 0.55 + i * 0.16, 0.7);
+  },
+
   step() {   // footstep note: a chord tone of the current bar, up to two octaves higher when close
     const s = this.cur;
     if (!this.ready || !s || !s.live || !s.running || s.found || !s.inBounds) return;
@@ -265,12 +284,17 @@ const Score = {
     ["C4", "E4", "G4", "C5"].forEach((nn, i) => this.inst.arp.triggerAttackRelease(nn, "8n", t + i * 0.25, 0.8));
   },
 
-  // s = { live, running, inBounds, found, d, rel } or null to go silent.
+  // s = { live, running, inBounds, found, d, rel, hunt, foundCount, total, targetId } or null to go silent.
   // rel = where the hider is relative to the way the seeker faces: { pan: -1 left .. 1 right, front: -1 behind .. 1 ahead }
   update(s) {
     this.cur = s;
-    if (!s) { this.dS = null; this.wasFound = false; this.lastD = null; this.wrongWay = false; return; }
+    if (!s) { this.dS = null; this.wasFound = false; this.lastD = null; this.wrongWay = false; this.lastTarget = undefined; this.lastCount = null; return; }
+    if (s.targetId !== this.lastTarget) {   // new target (hunt: one was just collected): jump, don't glide or call it "wrong way"
+      this.lastTarget = s.targetId; this.dS = null; this.lastD = null; this.trend = 0; this.wrongWay = false;
+    }
     this.dS = this.dS == null ? s.d : this.dS + CONFIG.smoothing * (s.d - this.dS);
+    const collected = s.hunt && this.lastCount != null && s.foundCount > this.lastCount && !s.found && s.live;
+    this.lastCount = s.foundCount;
 
     // Wrong way: distance trending upwards while searching (about 0.2 m/s away from the hider).
     if (this.lastD != null && s.running && s.inBounds && !s.found) {
@@ -292,6 +316,7 @@ const Score = {
     this.mix.gain.rampTo(!s.live ? 0 : (s.running && !s.inBounds && !s.found) ? 0.35 : 0.8, 0.3);
     const bpm = s.found ? 118 : 84 + 26 * p;                                                  // tempo climbs as you close in
     if (Math.abs(bpm - this.lastBpm) > 1) { this.lastBpm = bpm; Tone.Transport.bpm.rampTo(bpm, 1.5); }
+    if (collected) this.collect(s.foundCount);
     if (s.found && !this.wasFound && s.live) this.finale();
     this.wasFound = !!s.found;
   }
@@ -302,7 +327,11 @@ const Score = {
 const relTo = (pose, h) => { const a = Math.atan2(h.x - pose.x, h.y - pose.y) - pose.heading; return { pan: Math.sin(a), front: Math.cos(a) }; };
 const scoreInput = (st, live, pose) => {
   const p = pose || st.seeker;
-  return { live, running: st.running && st.trk !== false, inBounds: st.inBounds, found: st.found, d: st.d, rel: p && st.hider ? relTo(p, st.hider) : null };
+  return {
+    live, running: st.running && st.trk !== false, inBounds: st.inBounds, found: st.found, d: st.d,
+    rel: p && st.target ? relTo(p, st.target) : null,
+    hunt: st.mode === "hunt", foundCount: st.foundCount || 0, total: st.total || 0, targetId: st.active
+  };
 };
 
 /* =====================================================================
@@ -335,7 +364,15 @@ function mapPoint(M, e) {
   return { px, py, x: pX(M, px), y: pY(M, py) };
 }
 
-// st = server state; over = { seeker, hider } local positions that override st while dragging
+// Hunt targets as the map should show them, with any dragged / just-added one overridden.
+function mapTargets(st, over) {
+  const ts = (st.targets || []).map((t) => ({ x: t.x, y: t.y, found: t.found }));
+  const o = over.target;
+  if (o) { if (o.i < ts.length) { ts[o.i].x = o.x; ts[o.i].y = o.y; } else ts.push({ x: o.x, y: o.y, found: false }); }
+  return ts;
+}
+
+// st = server state; over = { seeker, hider, target:{i,x,y} } local positions that override st while dragging
 function drawMap(M, st, over = {}) {
   if (!st) return;
   mapFit(M, st.room);
@@ -346,7 +383,9 @@ function drawMap(M, st, over = {}) {
   const ax = mX(M, 0), ay = mY(M, R.h);
   ctx.fillStyle = "#1b1f27"; ctx.fillRect(ax, ay, R.w * sc, R.h * sc);
 
-  const hp = over.hider || st.hider;
+  const hunt = st.mode === "hunt";
+  const ts = hunt ? mapTargets(st, over) : [];
+  const hp = hunt ? (st.active != null ? ts[st.active] : null) : (over.hider || st.hider);   // where the music points
   const sp = over.seeker || st.seeker;
   if (hp) {   // zone rings around the hider
     const hx = mX(M, hp.x), hy = mY(M, hp.y);
@@ -368,13 +407,19 @@ function drawMap(M, st, over = {}) {
     ctx.fillStyle = "#fff"; ctx.font = "600 13px system-ui, sans-serif";
     ctx.fillText(Math.hypot(sp.x - hp.x, sp.y - hp.y).toFixed(1) + " m", (sx + hx) / 2, (sy + hy) / 2 - 8);
   }
-  const dot = (x, y, col, label) => {
-    ctx.beginPath(); ctx.arc(x, y, 16, 0, Math.PI * 2); ctx.fillStyle = col; ctx.fill();
+  const dot = (x, y, col, label, rad = 16) => {
+    ctx.beginPath(); ctx.arc(x, y, rad, 0, Math.PI * 2); ctx.fillStyle = col; ctx.fill();
     ctx.lineWidth = 3; ctx.strokeStyle = "#0e1015"; ctx.stroke();
     ctx.fillStyle = "#0e1015"; ctx.font = "800 14px system-ui, sans-serif"; ctx.textBaseline = "middle";
     ctx.fillText(label, x, y + 1); ctx.textBaseline = "alphabetic";
   };
-  if (hp) dot(mX(M, hp.x), mY(M, hp.y), "#ff4a2b", "H");
+  if (hunt) {   // numbered targets: grey tick = collected, red = the one the music points at
+    ts.forEach((t, i) => {
+      const x = mX(M, t.x), y = mY(M, t.y);
+      if (t.found) dot(x, y, "#4a5160", "\u2713", 13);
+      else dot(x, y, i === st.active ? "#ff4a2b" : "#ffa31a", String(i + 1), i === st.active ? 16 : 14);
+    });
+  } else if (hp) dot(mX(M, hp.x), mY(M, hp.y), "#ff4a2b", "H");
   if (sp) {
     const sx = mX(M, sp.x), sy = mY(M, sp.y), live = st.seeker && st.seeker.live;
     const col = !live ? "#6b7385" : st.inBounds ? "#3d8bff" : "#ff5468";   // grey = phone not sending, red = out of bounds
@@ -391,6 +436,7 @@ function drawMap(M, st, over = {}) {
    TRACKER (laptop)
    ===================================================================== */
 const T = { code: null, state: null, monitor: false, map: null, drag: null, dragPos: null, lastPlace: 0 };
+// T.drag = { who: "seeker" | "hider" | "target", i } while a dot is being dragged
 const tControl = (msg) => { if (socket && socket.connected) socket.emit("control", msg); };
 
 function trackerOnState(st) {
@@ -398,13 +444,47 @@ function trackerOnState(st) {
   if (document.activeElement !== $("#t-roomw")) $("#t-roomw").value = st.room.w;
   if (document.activeElement !== $("#t-roomh")) $("#t-roomh").value = st.room.h;
   if (T.monitor) Score.update(scoreInput(st, true));
+  renderTrackerUI(st);
   renderTracker();
+}
+
+function trackerStatus(st) {
+  const sk = st.seeker && st.seeker.live;
+  if (st.mode === "hunt") {
+    if (!st.total) return ["Tap the map to add targets, or scatter some at random", ""];
+    if (st.found) return [`All ${st.total} found!`, "win"];
+    const n = `${st.foundCount} of ${st.total} found`;
+    if (!sk) return [n + " \u00b7 waiting for the seeker phone", ""];
+    return [n + (st.running ? ` \u00b7 heading for target ${st.active + 1}` : " \u00b7 paused"), st.running ? "live" : ""];
+  }
+  if (st.found) return ["Found!", "win"];
+  if (!sk) return ["Waiting for the seeker phone", ""];
+  if (!st.hider) return ["Place the hider on the map", ""];
+  return [st.running ? "Round running" : "Paused", st.running ? "live" : ""];
+}
+
+function renderTrackerUI(st) {
+  const hunt = st.mode === "hunt";
+  $("#t-mode-hotcold").className = hunt ? "" : "primary";
+  $("#t-mode-hunt").className = hunt ? "primary" : "";
+  $("#t-hunt").hidden = !hunt;
+  $("#t-count").textContent = `${st.total} / ${CONFIG.maxTargets}`;
+  $("#t-order").textContent = st.order === "numbered" ? "Order: numbered (1, 2, 3\u2026)" : "Order: nearest first";
+  $("#t-found").textContent = hunt ? "Mark target found" : "Mark found";
+  $("#t-hint").textContent = hunt
+    ? "Tap the map to add a target, drag one to move it, right-click to remove it. Drag S to correct the seeker's drift."
+    : "Tap the map to place the hider. Drag S to correct the seeker's drift.";
+  $("#t-dlabel").textContent = hunt ? (st.active != null ? `to target ${st.active + 1}` : "") : "to the hider";
+  const [txt, cls] = trackerStatus(st);
+  $("#t-status").textContent = txt; $("#t-status").className = "status " + cls;
 }
 
 function renderTracker() {
   const st = T.state; if (!st) return;
   $("#t-d").textContent = st.trk ? st.d.toFixed(1) : "-";
-  drawMap(T.map, st, T.drag ? { [T.drag]: T.dragPos } : {});
+  let over = {};
+  if (T.drag && T.dragPos) over = { [T.drag.who]: T.drag.who === "target" ? { i: T.drag.i, ...T.dragPos } : T.dragPos };
+  drawMap(T.map, st, over);
 }
 
 function trackerSetCode(code) {
@@ -418,21 +498,51 @@ function initTrackerUI() {
   const cv = T.map.cv;
   const dragTo = (e, force) => {
     if (!T.drag) return;
-    const p = mapPoint(T.map, e);
-    T.dragPos = { x: p.x, y: p.y };
+    const p = mapPoint(T.map, e), R = T.state.room;
+    const x = T.drag.who === "seeker" ? p.x : clamp(p.x, 0, R.w), y = T.drag.who === "seeker" ? p.y : clamp(p.y, 0, R.h);
+    T.dragPos = { x, y };
     const now = performance.now();
-    if (force || now - T.lastPlace > 60) { T.lastPlace = now; tControl({ action: "place", who: T.drag, x: p.x, y: p.y }); }
+    if (force || now - T.lastPlace > 60) {
+      T.lastPlace = now;
+      if (T.drag.who === "target") tControl({ action: "move_target", i: T.drag.i, x, y });
+      else tControl({ action: "place", who: T.drag.who, x, y });
+    }
     renderTracker();
   };
-  // Drag S to correct drift; drag H, or tap empty space, to place the hider.
+  const nearPx = (p, q) => q ? Math.hypot(p.px - mX(T.map, q.x), p.py - mY(T.map, q.y)) : Infinity;
+  const nearestTarget = (p, st) => {   // { i, dist } of the hunt target closest to the pointer, in pixels
+    let best = { i: -1, dist: Infinity };
+    (st.targets || []).forEach((t, i) => { const d = nearPx(p, t); if (d < best.dist) best = { i, dist: d }; });
+    return best;
+  };
+  // Hot or cold: drag S to correct drift; drag H, or tap empty space, to place the hider.
+  // Hunt: drag S; drag a target to move it; tap empty space to add one; right-click a target to remove it.
   cv.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
     const st = T.state; if (!st) return;
     const p = mapPoint(T.map, e);
-    const near = (q) => q ? Math.hypot(p.px - mX(T.map, q.x), p.py - mY(T.map, q.y)) : Infinity;
-    const ds = near(st.seeker), dh = near(st.hider);
-    T.drag = (ds <= 36 && ds <= dh) ? "seeker" : "hider";
+    const ds = nearPx(p, st.seeker);
+    if (st.mode === "hunt") {
+      const nt = nearestTarget(p, st);
+      if (ds <= 36 && ds <= nt.dist) T.drag = { who: "seeker" };
+      else if (nt.dist <= 24) T.drag = { who: "target", i: nt.i };
+      else if ((st.targets || []).length < CONFIG.maxTargets) {
+        const R = st.room;
+        tControl({ action: "add_target", x: clamp(p.x, 0, R.w), y: clamp(p.y, 0, R.h) });
+        T.drag = { who: "target", i: st.targets.length };   // keep dragging the new one until release
+      } else return;
+    } else {
+      const dh = nearPx(p, st.hider);
+      T.drag = { who: (ds <= 36 && ds <= dh) ? "seeker" : "hider" };
+    }
     try { cv.setPointerCapture(e.pointerId); } catch (err) {}
     dragTo(e, true);
+  });
+  cv.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    const st = T.state; if (!st || st.mode !== "hunt") return;
+    const nt = nearestTarget(mapPoint(T.map, e), st);
+    if (nt.dist <= 24) tControl({ action: "remove_target", i: nt.i });
   });
   cv.addEventListener("pointermove", dragTo);
   cv.addEventListener("pointerup", (e) => { if (T.drag) { dragTo(e, true); T.drag = null; T.dragPos = null; } });
@@ -442,6 +552,13 @@ function initTrackerUI() {
   const sendRoom = () => tControl({ action: "room", w: parseFloat($("#t-roomw").value) || 6, h: parseFloat($("#t-roomh").value) || 6 });
   $("#t-roomw").addEventListener("change", sendRoom);
   $("#t-roomh").addEventListener("change", sendRoom);
+
+  $("#t-mode-hotcold").addEventListener("click", () => tControl({ action: "mode", mode: "hotcold" }));
+  $("#t-mode-hunt").addEventListener("click", () => tControl({ action: "mode", mode: "hunt" }));
+  $("#t-scatter").addEventListener("click", () => tControl({ action: "scatter", n: clamp(parseInt($("#t-scatter-n").value, 10) || 5, 1, CONFIG.maxTargets) }));
+  $("#t-undo").addEventListener("click", () => tControl({ action: "remove_target", i: "last" }));
+  $("#t-clear").addEventListener("click", () => tControl({ action: "clear_targets" }));
+  $("#t-order").addEventListener("click", () => tControl({ action: "order", order: T.state && T.state.order === "numbered" ? "nearest" : "numbered" }));
 
   $("#t-start").addEventListener("click", () => { Score.wasFound = false; tControl({ action: "start" }); });
   $("#t-stop").addEventListener("click", () => tControl({ action: "pause" }));
@@ -575,6 +692,12 @@ function seekerRender() {
   if (st) {
     const d = Score.dS != null ? Score.dS : st.d;
     $("#s-d").textContent = st.trk === false ? "-" : d.toFixed(1);
+    const pr = $("#s-progress");
+    if (st.mode === "hunt") {
+      pr.hidden = false;
+      pr.textContent = !st.total ? "Scavenger hunt: waiting for targets"
+        : st.found ? `All ${st.total} found!` : `Found ${st.foundCount} of ${st.total}`;
+    } else { pr.hidden = !st.found; pr.textContent = "Found!"; }
   }
 }
 
@@ -654,6 +777,9 @@ function hiderJoin(code) {
   socket.on("state", (st) => {
     H.state = st;
     if (st.hider && !H.dragging) H.me = { x: st.hider.x, y: st.hider.y };
+    $("#h-note").textContent = st.mode === "hunt"
+      ? "Scavenger hunt: the laptop places the targets, so there's nothing to tap. You can watch the hunt here."
+      : "Tap the map where you are hiding.";
     drawMap(H.map, st, H.me ? { hider: H.me } : {});
   });
   socket.on("set_pos", (p) => { H.me = { x: p.x, y: p.y }; });
@@ -671,7 +797,7 @@ function startHider(prefill) {
     hiderJoin(code);
   });
   const place = (e) => {
-    if (!H.joined || !H.state) return;
+    if (!H.joined || !H.state || H.state.mode === "hunt") return;
     const p = mapPoint(H.map, e), R = H.state.room;
     H.me = { x: clamp(p.x, 0, R.w), y: clamp(p.y, 0, R.h) };
     socket.emit("move", H.me);
