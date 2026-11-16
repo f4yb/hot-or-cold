@@ -36,18 +36,28 @@
     </div>
 
     <div class="card">
+      <h2>Game mode</h2>
+      <div class="row">
+        <button id="t-mode-hotcold">Hot or Cold</button>
+        <button id="t-mode-hunt">Scavenger hunt</button>
+      </div>
+    </div>
+
+    <div class="card">
       <h2>Round</h2>
       <div class="row">
         <button class="good" id="t-start">Start round</button>
         <button id="t-stop">Pause</button>
         <button id="t-found">Mark found</button>
       </div>
+      <p class="status" id="t-status">Waiting for the seeker phone</p>
     </div>
 
     <div class="card">
       <h2>Distance input</h2>
       <div id="panel-map">
         <canvas id="map"></canvas>
+        <p class="hint" id="t-hint">Tap the map to place the hider. Drag S to correct the seeker's drift.</p>
         <div class="row" style="margin-top:12px">
           <div><label for="t-roomw">Play area width (m)</label><input type="number" id="t-roomw" min="2" max="30" step="0.5" value="6" inputmode="decimal" /></div>
           <div><label for="t-roomh">Play area depth (m)</label><input type="number" id="t-roomh" min="2" max="30" step="0.5" value="6" inputmode="decimal" /></div>
@@ -55,8 +65,24 @@
       </div>
     </div>
 
+    <div class="card" id="t-hunt" hidden>
+      <h2>Targets <span class="mono muted" id="t-count">0 / 12</span></h2>
+      <div class="row">
+        <div style="flex:0 0 96px"><label for="t-scatter-n">How many</label><input type="number" id="t-scatter-n" min="1" max="12" step="1" value="5" inputmode="numeric" /></div>
+        <button id="t-scatter" style="align-self:flex-end">Scatter at random</button>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button id="t-undo">Remove last</button>
+        <button id="t-clear">Clear all</button>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button id="t-order">Order: nearest first</button>
+      </div>
+    </div>
+
     <div class="card">
       <div class="big mono"><span id="t-d">0.0</span> m</div>
+      <div class="muted" id="t-dlabel">to the hider</div>
     </div>
 
     <div class="card">
@@ -82,6 +108,7 @@
     <div id="s-live" hidden>
       <div class="card">
         <div class="big mono"><span id="s-d">-</span> m</div>
+        <div class="progress" id="s-progress" hidden></div>
       </div>
 
       <div class="card">
@@ -111,6 +138,7 @@
 
     <div id="h-live" hidden>
       <div class="card">
+        <p class="hint" id="h-note" style="margin:0 0 10px">Tap the map where you are hiding.</p>
         <canvas id="h-map"></canvas>
       </div>
     </div>
