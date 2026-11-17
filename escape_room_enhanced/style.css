@@ -1,0 +1,18 @@
+:root{--bg:#0e1015;--panel:#171a22;--panel2:#1f232d;--line:#2a2f3b;--text:#f1f3f7;--muted:#98a0b3;--ok:#3ddc84;--accent:#ff7a3d}
+*{box-sizing:border-box}[hidden]{display:none!important}html,body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+body{min-height:100vh;padding:max(16px,env(safe-area-inset-top)) 16px max(24px,env(safe-area-inset-bottom))}main{max-width:760px;margin:auto}
+h1{font-size:1.7rem;margin:8px 0 4px}h2{font-size:1.05rem;margin:0 0 10px}.muted,.hint,label{color:var(--muted)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;margin:12px 0}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:end}.row>*{flex:1 1 0;min-width:0}.stack>*+*{margin-top:10px}.stack>button{width:100%}
+button{font:inherit;font-weight:650;color:var(--text);background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:14px 16px;min-height:48px;cursor:pointer;touch-action:manipulation}
+button.primary{background:var(--accent);border-color:var(--accent);color:#1a0d05}button.good{background:var(--ok);color:#05210f}
+button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+input{font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px;width:100%;min-height:48px}
+input[type=range]{padding:0;accent-color:var(--accent);min-height:32px}
+label{display:block;font-size:.9rem;margin:0 0 6px}.code{font-size:2.6rem;font-weight:850;letter-spacing:.18em;font-variant-numeric:tabular-nums}
+.big{font-size:3rem;font-weight:850;line-height:1.1;margin:8px 0}.mono,.code{font-variant-numeric:tabular-nums}
+canvas{display:block;width:100%;background:#14171d;border-radius:12px;touch-action:none;margin:8px auto}
+.status{font-weight:650;color:var(--muted);margin:10px 0 0}.status.live{color:var(--text)}.status.win{color:var(--ok)}
+.progress{font-size:1.15rem;font-weight:700;color:var(--muted);margin-top:8px}.hint{font-size:.9rem;line-height:1.45}
+.banner{padding:12px;border-radius:10px;background:var(--panel2);border:1px solid var(--line);margin-top:10px}
+header{display:flex;justify-content:space-between;align-items:center}header button{flex:0 0 auto}
