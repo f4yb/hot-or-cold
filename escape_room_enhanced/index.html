@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>MUSI3071 — Escape Room</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+<script src="script.js" defer></script>
+</head>
+<body><main>
+<section id="home">
+  <h1>MUSI3071</h1><p class="muted">Audio-guided escape room</p>
+  <div class="card stack">
+    <button class="primary" id="go-tracker">Laptop · Game controller</button>
+    <button id="go-escapee">Escapee phone</button>
+    <button id="go-chaser">Chaser phone</button>
+  </div>
+</section>
+
+<section id="tracker" hidden>
+  <header><h1>Laptop controller</h1><button id="t-back">Back</button></header>
+  <div class="card"><label>Room code — enter this on both phones</label><div class="code" id="t-code">----</div></div>
+  <div class="card">
+    <h2>Round control</h2>
+    <div class="row"><button class="primary" id="t-start">Start · 60-second head start</button><button id="t-pause">Pause</button><button id="t-reset">Reset</button></div>
+    <p class="status" id="t-status">Set up the room, keys and exit.</p>
+    <div class="big mono" id="t-countdown">60</div>
+    <p class="muted">Chaser remains stationary during the countdown.</p>
+  </div>
+  <div class="card">
+    <h2>Room map</h2><canvas id="map"></canvas>
+    <p class="hint">Tap empty space to add a key. Select “Place exit” then tap to position the exit. Drag either player marker to correct their position.</p>
+    <div class="row"><button id="t-tool-key" class="primary">Add keys</button><button id="t-tool-exit">Place exit</button></div>
+    <div class="row"><button id="t-undo">Remove last key</button><button id="t-clear">Clear keys</button></div>
+    <div class="row">
+      <div><label for="t-roomw">Width (m)</label><input id="t-roomw" type="number" min="2" max="30" step=".5" value="6"></div>
+      <div><label for="t-roomh">Depth (m)</label><input id="t-roomh" type="number" min="2" max="30" step=".5" value="6"></div>
+    </div>
+    <p class="status" id="t-keys">0 keys placed</p>
+    <p class="hint">Keys now need the escapee to get within 0.35 m. Phone position is estimated from steps and compass, so use the map to correct drift if needed.</p>
+  </div>
+  <div class="card"><h2>Players</h2><p id="t-players" class="status">Waiting for both phones…</p></div>
+</section>
+
+<section id="phone" hidden>
+  <header><h1 id="p-title">Player</h1><button id="p-back">Back</button></header>
+  <div class="card" id="p-join">
+    <label for="p-code">Four-character room code</label><input id="p-code" type="text" maxlength="4" autocomplete="off" autocapitalize="characters" placeholder="ROOM CODE">
+    <button class="primary" id="p-joinbtn">Join game</button><div id="p-error" class="banner" hidden></div>
+  </div>
+  <div id="p-live" hidden>
+    <div class="card">
+      <div class="big mono" id="p-phase">Waiting</div>
+      <p class="status" id="p-message">Waiting for the laptop to start.</p>
+      <div class="progress" id="p-progress"></div>
+    </div>
+    <div class="card stack">
+      <button class="primary" id="p-sensors">1. Enable walking sensors</button>
+      <button id="p-calibrate">2. Stand at your start position facing the top wall, then calibrate</button>
+      <label for="p-step-length">Walking distance per step: <strong id="p-step-value">0.65 m</strong></label>
+      <input id="p-step-length" type="range" min="0.35" max="0.95" step="0.05" value="0.65">
+      <button id="p-audio">Enable horror music and proximity sounds</button>
+    </div>
+    <p class="hint">Keep this screen awake, wear headphones and walk carefully. The music builds as the chaser approaches; footsteps speed up as the players get closer. Escapee piano notes become brighter and quicker near each key.</p>
+  </div>
+</section>
+</main></body></html>
